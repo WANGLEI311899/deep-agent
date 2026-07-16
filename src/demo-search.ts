@@ -5,7 +5,7 @@
  * 需要：TAVILY_API_KEY 环境变量
  */
 import 'dotenv/config'
-import { creatAgent } from './agent.js'
+import { createAgent } from './agent.js'
 import { TavilySearch } from './tools/tavily-search.js'
 
 async function main() {
@@ -19,7 +19,7 @@ async function main() {
   // 初始化搜索工具
   const search = new TavilySearch(process.env.TAVILY_API_KEY)
   // 初始化 Agent
-  const agent = await creatAgent({
+  const agent = await createAgent({
     name: 'DeepAgent - 搜索版',
     skillDir: '.deepagent/skills',
     sandbox: {

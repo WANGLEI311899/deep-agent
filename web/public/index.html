@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DeepAgent</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Outfit:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <aside class="sidebar" id="sidebar">
+        <div class="sidebar-top">
+          <div class="brand">
+            <div class="brand-mark" aria-hidden="true">
+              <span class="brand-mark-inner">D</span>
+            </div>
+            <div class="brand-text">
+              <span class="brand-name">DeepAgent</span>
+              <span class="brand-sub">本地智能体工作台</span>
+            </div>
+          </div>
+
+          <button class="btn btn-new" id="btnNewChat" type="button">
+            <span class="btn-new-plus" aria-hidden="true">+</span>
+            开始新对话
+          </button>
+        </div>
+
+        <div class="sidebar-section grow">
+          <div class="section-label">对话</div>
+          <ul class="session-list" id="sessionList">
+            <li class="session-item muted">加载中…</li>
+          </ul>
+        </div>
+
+        <div class="sidebar-section">
+          <div class="section-head">
+            <div class="section-label">输出目录</div>
+            <button class="btn-tiny" id="btnAddWorkspace" type="button" title="添加目录">+</button>
+          </div>
+          <ul class="workspace-list" id="workspaceList">
+            <li class="file-item muted">加载中…</li>
+          </ul>
+          <div class="output-path-pill" id="outputPathPill">
+            <strong>写入位置</strong>
+            <span id="outputPathText">—</span>
+          </div>
+        </div>
+
+        <div class="sidebar-section">
+          <div class="section-label">技能</div>
+          <ul class="skill-list" id="skillList">
+            <li class="skill-item muted">加载中…</li>
+          </ul>
+        </div>
+
+        <div class="sidebar-section">
+          <div class="section-label">目录文件</div>
+          <ul class="file-list" id="fileList">
+            <li class="file-item muted">暂无文件</li>
+          </ul>
+        </div>
+
+        <div class="sidebar-foot">
+          <div class="model-pill" id="modelPill">deepseek-chat</div>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <button class="icon-btn" id="btnToggleSidebar" type="button" title="折叠侧栏" aria-label="折叠侧栏">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+              <rect x="2.5" y="3.5" width="5" height="11" rx="1" stroke="currentColor" stroke-width="1.4" />
+              <path d="M10 4.5h5.5M10 9h5.5M10 13.5h5.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+            </svg>
+          </button>
+          <div class="topbar-title">
+            <span class="dot" id="statusDot"></span>
+            <span id="statusText">就绪</span>
+            <span class="topbar-session" id="sessionTitle">新对话</span>
+          </div>
+          <div class="topbar-actions">
+            <button class="btn btn-ghost" id="btnClear" type="button">清空会话</button>
+          </div>
+        </header>
+
+        <section class="chat-scroll" id="chatScroll">
+          <div class="empty-state" id="emptyState">
+            <div class="empty-kicker">DeepAgent</div>
+            <h1>今天想做什么？</h1>
+            <p class="empty-lead">写任务、看过程、确认后再写入本地目录。</p>
+
+            <div class="suggestions" id="suggestions">
+              <button
+                type="button"
+                data-prompt="帮我审查这段代码：const data = await fetch('/api/users'); const users = data.json(); console.log(users)"
+              >
+                <span class="sug-idx">01</span>
+                <span class="sug-body">
+                  <span class="sug-title">代码审查</span>
+                  <span class="sug-desc">找出 fetch 用法里的问题</span>
+                </span>
+              </button>
+              <button
+                type="button"
+                data-prompt="用 Markdown 写一份 Vue3 Composition API 入门说明，并保存为 vue3-intro.md"
+              >
+                <span class="sug-idx">02</span>
+                <span class="sug-body">
+                  <span class="sug-title">生成并落盘</span>
+                  <span class="sug-desc">文档写入当前输出目录</span>
+                </span>
+              </button>
+              <button type="button" data-prompt="飞流直下三千尺，疑是银河落九天">
+                <span class="sug-idx">03</span>
+                <span class="sug-body">
+                  <span class="sug-title">诗词技能</span>
+                  <span class="sug-desc">用古诗开个轻松玩笑</span>
+                </span>
+              </button>
+              <button
+                type="button"
+                data-prompt="介绍一下你当前加载了哪些技能，以及各自适合什么场景"
+              >
+                <span class="sug-idx">04</span>
+                <span class="sug-body">
+                  <span class="sug-title">技能一览</span>
+                  <span class="sug-desc">看看现在能做什么</span>
+                </span>
+              </button>
+            </div>
+          </div>
+
+          <div class="messages" id="messages" hidden></div>
+        </section>
+
+        <footer class="composer-wrap">
+          <form class="composer" id="composer">
+            <div class="composer-box">
+              <textarea
+                id="input"
+                rows="1"
+                placeholder="描述你的任务… Enter 发送，Shift+Enter 换行"
+                autocomplete="off"
+              ></textarea>
+              <div class="composer-bar">
+                <div class="composer-hint">
+                  <span class="kbd">Enter</span>
+                  <span class="hint-text">发送</span>
+                  <span class="sep"></span>
+                  <span class="kbd">⇧ Enter</span>
+                  <span class="hint-text">换行</span>
+                </div>
+                <button class="send-btn" id="btnSend" type="submit" disabled title="发送">
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <path
+                      d="M2.5 8h11M8.5 3.5 13 8l-4.5 4.5"
+                      stroke="currentColor"
+                      stroke-width="1.6"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </form>
+          <p class="disclaimer">写入文件与高风险操作会先征求你的确认。结果请自行核对。</p>
+        </footer>
+      </main>
+    </div>
+
+    <!-- HITL -->
+    <div class="modal-root" id="hitlModal" hidden>
+      <div class="modal-backdrop" data-hitl-dismiss></div>
+      <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="hitlTitle">
+        <div class="modal-head">
+          <div class="modal-badge" id="hitlBadge">确认</div>
+          <h2 id="hitlTitle">需要你拍板</h2>
+        </div>
+        <p class="modal-desc" id="hitlDesc">准备执行下列操作，确认后才会继续。</p>
+        <div class="modal-op" id="hitlOperation"></div>
+        <pre class="modal-detail" id="hitlDetail" hidden></pre>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-reject" id="btnHitlReject">拒绝</button>
+          <button type="button" class="btn btn-approve" id="btnHitlApprove">批准并继续</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Workspace -->
+    <div class="modal-root" id="workspaceModal" hidden>
+      <div class="modal-backdrop" id="workspaceBackdrop"></div>
+      <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="wsModalTitle">
+        <div class="modal-head">
+          <div class="modal-badge muted-badge">目录</div>
+          <h2 id="wsModalTitle">添加本地输出目录</h2>
+        </div>
+        <p class="modal-desc">
+          指定本机任意文件夹。生成内容会写入<strong>当前激活</strong>的目录，可按项目随时切换。
+        </p>
+        <div class="modal-field">
+          <label for="wsNameInput">显示名称（可选）</label>
+          <input id="wsNameInput" type="text" placeholder="工作文档、项目草稿…" autocomplete="off" />
+        </div>
+        <div class="modal-field">
+          <label for="wsPathInput">文件夹绝对路径</label>
+          <input
+            id="wsPathInput"
+            type="text"
+            placeholder="D:\docs\my-project"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <div class="hint">从资源管理器地址栏复制完整路径。不存在会自动创建；名称留空则用文件夹名。</div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-reject" id="btnWsCancel">取消</button>
+          <button type="button" class="btn btn-approve" id="btnWsSave">保存并使用</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

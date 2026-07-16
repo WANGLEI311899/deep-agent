@@ -7,12 +7,12 @@
 
 import 'dotenv/config'
 import readline from 'readline'
-import { creatAgent } from './agent.js'
+import { createAgent } from './agent.js'
 import process from 'process'
 
 async function main() {
   // 创建并初始化 Agent
-  const agent = await creatAgent({
+  const agent = await createAgent({
     name: 'DeepAgent',
     skillDir: '.deepagent/skills',
     sandbox: {

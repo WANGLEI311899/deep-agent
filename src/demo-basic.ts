@@ -3,9 +3,9 @@
 // 2.构建系统提示词，包含技能说明，沙箱说明
 // 3.调用模型接口 获取回复，解析回复中的文件输出指令 写入文件
 import 'dotenv/config'
-import { creatAgent } from './agent.js'
+import { createAgent } from './agent.js'
 async function main() {
-  const agent = await creatAgent({
+  const agent = await createAgent({
     name: 'DeepAgent 基础版（Skill 调用）',
     skillDir: '.deepagent/skills',
     sandbox: {

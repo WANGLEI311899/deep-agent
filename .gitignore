@@ -1,6 +1,10 @@
 # 环境变量（包含 API Key，绝对不能提交）
 .env
 
+# 本地工作区 / 会话（含用户路径与对话内容）
+.deepagent/workspaces.json
+.deepagent/sessions.json
+
 # 依赖目录（体积大，从 package.json 恢复）
 node_modules/
 .certs/
