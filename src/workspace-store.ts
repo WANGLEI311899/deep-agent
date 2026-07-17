@@ -1,6 +1,6 @@
 /**
  * 本地输出目录（工作区）管理。
- * 配置持久化到 .deepagent/workspaces.json。
+ * 配置持久化到 .deepcodex/workspaces.json。
  * 路径完全由使用者自行添加/修改，可为任意本机绝对路径。
  */
 import fs from 'fs'
@@ -21,7 +21,7 @@ export interface WorkspaceState {
   folders: WorkspaceFolder[]
 }
 
-const CONFIG_DIR = path.resolve(process.cwd(), '.deepagent')
+const CONFIG_DIR = path.resolve(process.cwd(), '.deepcodex')
 const CONFIG_FILE = path.join(CONFIG_DIR, 'workspaces.json')
 
 function defaultOutputPath(): string {

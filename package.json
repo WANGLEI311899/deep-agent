@@ -1,15 +1,15 @@
 {
-  "name": "deep-agent",
+  "name": "deep-codex",
   "version": "1.0.0",
-  "description": "DeepAgent：基于 DeepSeek 的通用型 AI 智能体",
+  "description": "deepCodex：基于 DeepSeek 的通用型 AI 智能体",
   "type": "module",
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
     "test": "npm run build && node --test tests/*.test.mjs",
+    "start": "node dist/server.mjs",
     "dev": "npm run build && node scripts/run-demo.mjs index.mjs",
     "ui": "npm run build && node scripts/run-demo.mjs server.mjs",
-    "start": "node dist/server.mjs",
     "demo:basic": "npm run build && node scripts/run-demo.mjs",
     "demo:search": "npm run build && node scripts/run-demo.mjs demo-search.mjs",
     "demo:multi": "npm run build && node dist/demo-multi-agent.mjs"

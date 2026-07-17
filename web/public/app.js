@@ -1,5 +1,5 @@
 /**
- * DeepAgent Web UI
+ * deepCodex Web UI
  * - 多会话历史
  * - SSE 流式 + 工具调用时间线
  * - HITL 弹窗确认
@@ -7,7 +7,7 @@
 
 const $ = (sel, root = document) => root.querySelector(sel)
 
-const TOKEN_KEY = 'deepagent_access_token'
+const TOKEN_KEY = 'deepcodex_access_token'
 
 const els = {
   app: $('.app'),
@@ -467,7 +467,7 @@ function appendAssistantShell(messageId, { streaming = true } = {}) {
   row.innerHTML = `
     <div class="msg-avatar">DA</div>
     <div class="msg-body">
-      <div class="msg-role">DeepAgent</div>
+      <div class="msg-role">deepCodex</div>
       <div class="tool-timeline"></div>
       <div class="msg-content md ${streaming ? 'streaming' : ''}"></div>
       <div class="msg-meta" hidden></div>

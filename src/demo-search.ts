@@ -20,8 +20,8 @@ async function main() {
   const search = new TavilySearch(process.env.TAVILY_API_KEY)
   // 初始化 Agent
   const agent = await createAgent({
-    name: 'DeepAgent - 搜索版',
-    skillDir: '.deepagent/skills',
+    name: 'deepCodex - 搜索版',
+    skillDir: '.deepcodex/skills',
     sandbox: {
       workspacePath: process.cwd(),
       outputDir: 'output',
@@ -60,7 +60,7 @@ async function main() {
 2. 快速入门步骤（3-5步）
 3. 注意事项
 
-写完后保存到文件 deep-agent-notes.md。
+写完后保存到文件 deep-codex-notes.md。
 
 以下是搜索到的资料：
 ${searchResults
@@ -79,20 +79,20 @@ ${searchResults
     console.log('\n⚠️  AI 没有使用 filename 格式，手动保存内容...')
     const sandbox = agent.getSandbox()
     if (sandbox) {
-      sandbox.writeFile('deep-agent-notes.md', result.content)
+      sandbox.writeFile('deep-codex-notes.md', result.content)
     }
   }
   // 第三步：展示结果
   console.log('\n📄 第三步：查看生成的文件')
   const sandbox = agent.getSandbox()
   if (sandbox) {
-    const content = sandbox.readFile('deep-agent-notes.md')
+    const content = sandbox.readFile('deep-codex-notes.md')
     if (content) {
       console.log('\n文件内容预览（前 400 字）：')
       console.log('─'.repeat(50))
       console.log(content.slice(0, 400) + (content.length > 400 ? '\n...' : ''))
       console.log('─'.repeat(50))
-      console.log('\n完整文件位置：output/deep-agent-notes.md')
+      console.log('\n完整文件位置：output/deep-codex-notes.md')
     }
   }
 }

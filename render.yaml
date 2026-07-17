@@ -3,7 +3,7 @@
 
 services:
   - type: web
-    name: deep-agent
+    name: deep-codex
     runtime: docker
     plan: free
     healthCheckPath: /api/health

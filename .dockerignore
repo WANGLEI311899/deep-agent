@@ -8,11 +8,11 @@ dist
 .certs
 output/*
 !output/.gitkeep
-.deepagent/sessions.json
-.deepagent/workspaces.json
+.deepcodex/sessions.json
+.deepcodex/workspaces.json
 *.log
-.deepagent-ui*.log
+.deepcodex-ui*.log
 README.md
 docs
 **/*.md
-!.deepagent/skills/**/*.md
+!.deepcodex/skills/**/*.md

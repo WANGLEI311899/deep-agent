@@ -6,8 +6,8 @@ import 'dotenv/config'
 import { createAgent } from './agent.js'
 async function main() {
   const agent = await createAgent({
-    name: 'DeepAgent 基础版（Skill 调用）',
-    skillDir: '.deepagent/skills',
+    name: 'deepCodex 基础版（Skill 调用）',
+    skillDir: '.deepcodex/skills',
     sandbox: {
       workspacePath: process.cwd(),
       outputDir: 'output',

@@ -78,7 +78,7 @@ function now() {
   return Date.now()
 }
 
-export class DeepAgent {
+export class deepCodex {
   private client: OpenAI
   private config: ResolvedAgentConfig
   private skills: Skill[] = []
@@ -93,7 +93,7 @@ export class DeepAgent {
       apiKey: config.apiKey ?? process.env.DEEPSEEK_API_KEY ?? '',
       temperature:
         config.temperature ?? Number(process.env.DEEPSEEK_TEMPERATURE ?? 0.7),
-      skillDir: config.skillDir ?? '.deepagent/skills',
+      skillDir: config.skillDir ?? '.deepcodex/skills',
       sandbox: config.sandbox ?? {
         workspacePath: process.cwd(),
         outputDir: 'output',
@@ -575,8 +575,8 @@ ${this.config.systemPrompt}`
 }
 
 /** 工厂函数：创建并初始化智能体。 */
-export async function createAgent(config: AgentConfig): Promise<DeepAgent> {
-  const agent = new DeepAgent(config)
+export async function createAgent(config: AgentConfig): Promise<deepCodex> {
+  const agent = new deepCodex(config)
   await agent.init()
   return agent
 }

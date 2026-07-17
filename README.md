@@ -1,9 +1,9 @@
-# DeepAgent
+# deepCodex
 
 基于 DeepSeek 的 AI 智能体：支持技能（Skill）、沙箱写文件、HITL 确认、多会话 Web UI。  
 可本机运行，也可部署到公网，让别人通过一个网址使用（需访问口令）。
 
-**仓库地址：** https://github.com/WANGLEI311899/deep-agent
+**仓库地址：** https://github.com/WANGLEI311899/deep-codex
 
 ## 环境要求
 
@@ -46,7 +46,7 @@ npm run ui
 ### 方式一：Railway（推荐，步骤少）
 
 1. 打开 [Railway](https://railway.app) → New Project → Deploy from GitHub  
-2. 选择仓库 `WANGLEI311899/deep-agent`（或你的 fork）  
+2. 选择仓库 `WANGLEI311899/deep-codex`（或你的 fork）  
 3. 构建方式会读根目录 `Dockerfile` / `railway.toml`  
 4. 在 Variables 中添加：
 
@@ -56,7 +56,7 @@ npm run ui
    PUBLIC_MODE=true
    ```
 
-5. 部署完成后打开生成的域名，例如 `https://deep-agent-production-xxxx.up.railway.app`  
+5. 部署完成后打开生成的域名，例如 `https://deep-codex-production-xxxx.up.railway.app`  
 6. 把 **网址 + 访问口令** 发给朋友即可  
 
 健康检查路径：`/api/health`。
@@ -70,12 +70,12 @@ npm run ui
 ### 方式三：本机 Docker
 
 ```bash
-docker build -t deep-agent .
+docker build -t deep-codex .
 docker run --rm -p 5173:5173 \
   -e DEEPSEEK_API_KEY=sk-你的密钥 \
   -e ACCESS_TOKEN=你的访问口令 \
   -e PUBLIC_MODE=true \
-  deep-agent
+  deep-codex
 ```
 
 浏览器打开 `http://localhost:5173`，输入 `ACCESS_TOKEN`。
@@ -119,7 +119,7 @@ src/
   skill-loader.ts     # Skill 加载
   tools/              # 搜索等工具
 web/public/           # 前端静态页面
-.deepagent/
+.deepcodex/
   skills/             # *.skill.md 技能文件
   workspaces.json     # 输出目录配置（本地，gitignore）
   sessions.json       # 会话历史（本地，gitignore）

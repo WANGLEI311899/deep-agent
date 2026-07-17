@@ -9,8 +9,8 @@
 !.env.example
 
 # 本地工作区 / 会话（含用户路径与对话内容）
-.deepagent/workspaces.json
-.deepagent/sessions.json
+.deepcodex/workspaces.json
+.deepcodex/sessions.json
 
 # 依赖目录（体积大，从 package.json 恢复）
 node_modules/
@@ -30,7 +30,7 @@ Thumbs.db
 # 日志文件
 *.log
 npm-debug.log*
-.deepagent-ui*.log
+.deepcodex-ui*.log
 
 # 证书 / 密钥材料
 *.pem

@@ -1,5 +1,5 @@
-# DeepAgent — 可部署到 Railway / Render / 任意 Docker 主机
-# 构建：docker build -t deep-agent .
+# deepCodex — 可部署到 Railway / Render / 任意 Docker 主机
+# 构建：docker build -t deep-codex .
 # 运行：见 README「在线部署」
 
 FROM node:20-alpine AS build
@@ -11,7 +11,7 @@ RUN npm ci
 COPY tsconfig.json tsup.config.ts ./
 COPY src ./src
 COPY web ./web
-COPY .deepagent/skills ./.deepagent/skills
+COPY .deepcodex/skills ./.deepcodex/skills
 COPY tests ./tests
 
 RUN npm run build
@@ -29,9 +29,9 @@ RUN npm ci --omit=dev && npm cache clean --force
 
 COPY --from=build /app/dist ./dist
 COPY web ./web
-COPY .deepagent/skills ./.deepagent/skills
+COPY .deepcodex/skills ./.deepcodex/skills
 
-RUN mkdir -p /app/output /app/.deepagent \
+RUN mkdir -p /app/output /app/.deepcodex \
   && addgroup -S app && adduser -S app -G app \
   && chown -R app:app /app
 

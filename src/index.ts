@@ -13,8 +13,8 @@ import process from 'process'
 async function main() {
   // 创建并初始化 Agent
   const agent = await createAgent({
-    name: 'DeepAgent',
-    skillDir: '.deepagent/skills',
+    name: 'deepCodex',
+    skillDir: '.deepcodex/skills',
     sandbox: {
       workspacePath: process.cwd(),
       outputDir: 'output',
@@ -25,7 +25,7 @@ async function main() {
       autoApprove: false, // 不自动同意，遇到高风险操作手动确认
     },
     systemPrompt: `
-你是 DeepAgent，一个专业的前端 + AI 全栈智能体，由 DeepSeek 驱动。
+你是 deepCodex，一个专业的前端 + AI 全栈智能体，由 DeepSeek 驱动。
 你擅长：
 - TypeScript / Vue3 / React 前端开发
 - LangChain / Deep Agent AI 应用开发
@@ -40,7 +40,7 @@ async function main() {
   })
 
   // 显示启动信息
-  console.log('\n🤖 DeepAgent 已就绪！')
+  console.log('\n🤖 deepCodex 已就绪！')
   console.log('─'.repeat(50))
   console.log('💡 已加载技能：')
   agent.getSkills().forEach((s) => {
@@ -102,7 +102,7 @@ async function main() {
     }
 
     // 正常对话，流式输出
-    process.stdout.write('\n🤖 DeepAgent：\n')
+    process.stdout.write('\n🤖 deepCodex：\n')
     await agent.invokeStream(trimmed)
   }
 }

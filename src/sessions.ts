@@ -1,6 +1,6 @@
 /**
  * 多会话管理：维护会话列表、UI 消息时间线、Agent 模型上下文。
- * 持久化到 .deepagent/sessions.json，服务重启后可恢复。
+ * 持久化到 .deepcodex/sessions.json，服务重启后可恢复。
  */
 import fs from 'fs'
 import path from 'path'
@@ -62,7 +62,7 @@ interface PersistedState {
   sessions: Session[]
 }
 
-const CONFIG_DIR = path.resolve(process.cwd(), '.deepagent')
+const CONFIG_DIR = path.resolve(process.cwd(), '.deepcodex')
 const CONFIG_FILE = path.join(CONFIG_DIR, 'sessions.json')
 const SAVE_DEBOUNCE_MS = 200
 
