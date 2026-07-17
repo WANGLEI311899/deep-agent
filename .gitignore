@@ -1,5 +1,12 @@
 # 环境变量（包含 API Key，绝对不能提交）
 .env
+.env.local
+.env.*.local
+.env.development
+.env.production
+.env.test
+# 保留可公开的模板
+!.env.example
 
 # 本地工作区 / 会话（含用户路径与对话内容）
 .deepagent/workspaces.json
@@ -23,3 +30,12 @@ Thumbs.db
 # 日志文件
 *.log
 npm-debug.log*
+.deepagent-ui*.log
+
+# 证书 / 密钥材料
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*

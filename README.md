@@ -13,18 +13,17 @@
 # 安装依赖
 npm install
 
-# 配置环境变量（项目根目录创建 .env）
-# DEEPSEEK_API_KEY=sk-...
-# DEEPSEEK_MODEL=deepseek-chat
-# DEEPSEEK_TEMPERATURE=0.7
-# DEEPSEEK_MAX_HISTORY=20
-# PORT=5173
-# TAVILY_API_KEY=        # 仅 demo:search / demo:multi 需要
+# 配置环境变量（复制模板后填入自己的 Key，切勿提交 .env）
+cp .env.example .env
+# 编辑 .env：至少填写 DEEPSEEK_API_KEY
+# 可选：TAVILY_API_KEY（仅 demo:search / demo:multi 需要）
 
 # 启动 Web UI（推荐）
 npm run ui
 # 浏览器打开 http://localhost:5173
 ```
+
+> **安全提示**：`.env` 已在 `.gitignore` 中忽略，请只把密钥写在本地 `.env`，不要写进源码或提交到 Git。
 
 ## 常用命令
 
@@ -91,4 +90,5 @@ web/public/           # 前端静态页面
 
 - 本项目面向**本机开发**使用，Web 服务默认无鉴权。
 - 输出目录可配置为任意本地路径，请勿对公网暴露端口。
-- API Key 仅放在 `.env`，不要提交到 Git。
+- API Key 只写在本地 `.env`（参考 `.env.example`），**不要**写进源码或提交到 Git。
+- 会话记录、工作区路径、证书与日志均已忽略，不会进入仓库。
