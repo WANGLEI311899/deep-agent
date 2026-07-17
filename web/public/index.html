@@ -13,7 +13,37 @@
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <div class="app">
+    <!-- 访问口令门禁（公网部署时启用） -->
+    <div class="auth-gate" id="authGate" hidden>
+      <div class="auth-card" role="dialog" aria-modal="true" aria-labelledby="authTitle">
+        <div class="auth-brand">
+          <div class="brand-mark" aria-hidden="true">
+            <span class="brand-mark-inner">D</span>
+          </div>
+          <div>
+            <h1 id="authTitle">DeepAgent</h1>
+            <p class="auth-sub">输入访问口令后继续使用</p>
+          </div>
+        </div>
+        <form id="authForm" class="auth-form">
+          <label for="authTokenInput">访问口令</label>
+          <input
+            id="authTokenInput"
+            type="password"
+            autocomplete="current-password"
+            placeholder="由部署者提供的 ACCESS_TOKEN"
+            required
+          />
+          <p class="auth-error" id="authError" hidden></p>
+          <button type="submit" class="btn btn-approve auth-submit" id="btnAuthSubmit">
+            进入工作台
+          </button>
+        </form>
+        <p class="auth-hint">口令仅保存在本浏览器会话中，不会写入服务端用户库。</p>
+      </div>
+    </div>
+
+    <div class="app" id="appRoot" hidden>
       <aside class="sidebar" id="sidebar">
         <div class="sidebar-top">
           <div class="brand">
@@ -22,7 +52,7 @@
             </div>
             <div class="brand-text">
               <span class="brand-name">DeepAgent</span>
-              <span class="brand-sub">本地智能体工作台</span>
+              <span class="brand-sub">AI 智能体工作台</span>
             </div>
           </div>
 
@@ -69,6 +99,9 @@
 
         <div class="sidebar-foot">
           <div class="model-pill" id="modelPill">deepseek-chat</div>
+          <button class="btn-tiny logout-btn" id="btnLogout" type="button" hidden title="清除本机口令">
+            退出登录
+          </button>
         </div>
       </aside>
 

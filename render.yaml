@@ -1,0 +1,24 @@
+# Render Blueprint：https://render.com
+# 连接 GitHub 仓库后可用此文件一键部署 Web Service
+
+services:
+  - type: web
+    name: deep-agent
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - key: PUBLIC_MODE
+        value: "true"
+      - key: HOST
+        value: "0.0.0.0"
+      - key: PORT
+        value: "5173"
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: ACCESS_TOKEN
+        generateValue: true
+      - key: DEEPSEEK_MODEL
+        value: deepseek-chat
+      - key: RATE_LIMIT_PER_MIN
+        value: "30"

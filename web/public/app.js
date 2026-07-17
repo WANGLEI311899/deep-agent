@@ -7,8 +7,16 @@
 
 const $ = (sel, root = document) => root.querySelector(sel)
 
+const TOKEN_KEY = 'deepagent_access_token'
+
 const els = {
   app: $('.app'),
+  authGate: $('#authGate'),
+  authForm: $('#authForm'),
+  authTokenInput: $('#authTokenInput'),
+  authError: $('#authError'),
+  btnAuthSubmit: $('#btnAuthSubmit'),
+  btnLogout: $('#btnLogout'),
   skillList: $('#skillList'),
   fileList: $('#fileList'),
   sessionList: $('#sessionList'),
@@ -57,7 +65,137 @@ const state = {
   activeWorkspaceId: null,
   /** null = 新增；string = 编辑该 id */
   editingWorkspaceId: null,
+  accessToken: sessionStorage.getItem(TOKEN_KEY) || '',
+  authRequired: false,
+  publicMode: false,
+  workspacesLocked: false,
 }
+
+/* ── Auth / API ─────────────────────────────────────────── */
+function getAccessToken() {
+  return state.accessToken || sessionStorage.getItem(TOKEN_KEY) || ''
+}
+
+function setAccessToken(token) {
+  state.accessToken = token || ''
+  if (token) sessionStorage.setItem(TOKEN_KEY, token)
+  else sessionStorage.removeItem(TOKEN_KEY)
+}
+
+function authHeaders(extra = {}) {
+  const headers = { ...extra }
+  const token = getAccessToken()
+  if (token) {
+    headers.Authorization = `Bearer ${token}`
+    headers['X-Access-Token'] = token
+  }
+  return headers
+}
+
+async function apiFetch(url, options = {}) {
+  const opts = { ...options }
+  const baseHeaders =
+    opts.body && !(opts.headers && opts.headers['Content-Type'])
+      ? { 'Content-Type': 'application/json' }
+      : {}
+  opts.headers = authHeaders({ ...baseHeaders, ...(opts.headers || {}) })
+  const res = await fetch(url, opts)
+  if (res.status === 401 && state.authRequired) {
+    showAuthGate('口令无效或已过期，请重新输入')
+  }
+  return res
+}
+
+function showAuthGate(errorMsg) {
+  document.body.classList.add('auth-locked')
+  if (els.app) els.app.hidden = true
+  if (els.authGate) els.authGate.hidden = false
+  if (els.authError) {
+    if (errorMsg) {
+      els.authError.hidden = false
+      els.authError.textContent = errorMsg
+    } else {
+      els.authError.hidden = true
+      els.authError.textContent = ''
+    }
+  }
+  els.authTokenInput?.focus()
+}
+
+function hideAuthGate() {
+  document.body.classList.remove('auth-locked')
+  if (els.authGate) els.authGate.hidden = true
+  if (els.app) els.app.hidden = false
+  if (els.btnLogout) els.btnLogout.hidden = !state.authRequired
+}
+
+async function checkAuthStatus() {
+  const res = await fetch('/api/auth/status', {
+    headers: authHeaders(),
+  })
+  if (!res.ok) throw new Error('无法连接服务')
+  const data = await res.json()
+  state.authRequired = Boolean(data.authRequired)
+  state.publicMode = Boolean(data.publicMode)
+  return data
+}
+
+async function ensureAuthorized() {
+  const status = await checkAuthStatus()
+  if (!status.authRequired) {
+    hideAuthGate()
+    return true
+  }
+  if (status.authorized && getAccessToken()) {
+    hideAuthGate()
+    return true
+  }
+  // 有缓存口令时先验证 meta
+  if (getAccessToken()) {
+    const probe = await apiFetch('/api/meta')
+    if (probe.ok) {
+      hideAuthGate()
+      return true
+    }
+    setAccessToken('')
+  }
+  showAuthGate()
+  return new Promise((resolve) => {
+    const onSubmit = async (e) => {
+      e.preventDefault()
+      const token = (els.authTokenInput?.value || '').trim()
+      if (!token) {
+        showAuthGate('请输入访问口令')
+        return
+      }
+      setAccessToken(token)
+      els.btnAuthSubmit.disabled = true
+      try {
+        const res = await apiFetch('/api/meta')
+        if (!res.ok) {
+          setAccessToken('')
+          showAuthGate('口令不正确，请重试')
+          return
+        }
+        els.authForm?.removeEventListener('submit', onSubmit)
+        hideAuthGate()
+        resolve(true)
+      } catch {
+        setAccessToken('')
+        showAuthGate('网络错误，请重试')
+      } finally {
+        els.btnAuthSubmit.disabled = false
+      }
+    }
+    els.authForm?.addEventListener('submit', onSubmit)
+  })
+}
+
+els.btnLogout?.addEventListener('click', () => {
+  setAccessToken('')
+  showAuthGate()
+  location.reload()
+})
 
 const STATUS_MAP = {
   ready: '就绪',
@@ -444,9 +582,8 @@ async function respondHitl(approved) {
   const id = current.id
   hideHitlModal()
   try {
-    const res = await fetch('/api/hitl', {
+    const res = await apiFetch('/api/hitl', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id, approved }),
     })
     if (!res.ok) {
@@ -478,7 +615,7 @@ document.addEventListener('keydown', (e) => {
 
 /* ── Sessions API ───────────────────────────────────────── */
 async function loadSessions() {
-  const res = await fetch('/api/sessions')
+  const res = await apiFetch('/api/sessions')
   if (!res.ok) throw new Error('无法加载会话列表')
   const data = await res.json()
   state.sessions = data.sessions || []
@@ -527,7 +664,7 @@ els.sessionList.addEventListener('click', async (e) => {
 })
 
 async function openSession(id) {
-  const res = await fetch(`/api/sessions/${encodeURIComponent(id)}`)
+  const res = await apiFetch(`/api/sessions/${encodeURIComponent(id)}`)
   if (!res.ok) {
     appendError('会话不存在或无法打开')
     return
@@ -542,7 +679,7 @@ async function openSession(id) {
 
 async function createSession() {
   if (state.busy) return
-  const res = await fetch('/api/sessions', { method: 'POST' })
+  const res = await apiFetch('/api/sessions', { method: 'POST' })
   if (!res.ok) throw new Error('创建会话失败')
   const data = await res.json()
   state.sessionId = data.id
@@ -554,7 +691,7 @@ async function createSession() {
 }
 
 async function deleteSession(id) {
-  const res = await fetch(`/api/sessions/${encodeURIComponent(id)}`, {
+  const res = await apiFetch(`/api/sessions/${encodeURIComponent(id)}`, {
     method: 'DELETE',
   })
   if (!res.ok) return
@@ -570,7 +707,7 @@ async function deleteSession(id) {
 
 async function clearCurrentSession() {
   if (!state.sessionId || state.busy) return
-  const res = await fetch(
+  const res = await apiFetch(
     `/api/sessions/${encodeURIComponent(state.sessionId)}/clear`,
     { method: 'POST' },
   )
@@ -587,10 +724,13 @@ async function clearCurrentSession() {
 /* ── Meta / files ───────────────────────────────────────── */
 async function loadMeta() {
   try {
-    const res = await fetch('/api/meta')
+    const res = await apiFetch('/api/meta')
     if (!res.ok) throw new Error(`meta ${res.status}`)
     const data = await res.json()
     els.modelPill.textContent = data.model || 'deepseek-chat'
+    state.publicMode = Boolean(data.publicMode)
+    state.workspacesLocked = Boolean(data.workspacesLocked || data.publicMode)
+    applyWorkspaceLockUi()
     if (Array.isArray(data.skills) && data.skills.length) {
       els.skillList.innerHTML = data.skills
         .map(
@@ -613,9 +753,20 @@ async function loadMeta() {
   }
 }
 
+function applyWorkspaceLockUi() {
+  if (!els.btnAddWorkspace) return
+  if (state.workspacesLocked) {
+    els.btnAddWorkspace.hidden = true
+    els.btnAddWorkspace.disabled = true
+  } else {
+    els.btnAddWorkspace.hidden = false
+    els.btnAddWorkspace.disabled = false
+  }
+}
+
 async function loadFiles() {
   try {
-    const res = await fetch('/api/files')
+    const res = await apiFetch('/api/files')
     if (!res.ok) return
     const data = await res.json()
     if (data.outputPath) {
@@ -641,11 +792,13 @@ async function loadFiles() {
 /* ── Workspaces（本地输出目录） ─────────────────────────── */
 async function loadWorkspaces() {
   try {
-    const res = await fetch('/api/workspaces')
+    const res = await apiFetch('/api/workspaces')
     if (!res.ok) throw new Error('无法加载工作区')
     const data = await res.json()
     state.workspaces = data.folders || []
     state.activeWorkspaceId = data.activeId
+    if (data.locked) state.workspacesLocked = true
+    applyWorkspaceLockUi()
     if (data.active?.path) els.outputPathText.textContent = data.active.path
     renderWorkspaceList()
   } catch (err) {
@@ -659,19 +812,23 @@ function renderWorkspaceList() {
     els.workspaceList.innerHTML = `<li class="file-item muted">暂无目录</li>`
     return
   }
+  const locked = state.workspacesLocked
   els.workspaceList.innerHTML = state.workspaces
     .map((w) => {
       const active = w.id === state.activeWorkspaceId ? 'active' : ''
-      return `
-        <li class="workspace-item ${active}" data-ws-id="${escapeHtml(w.id)}">
-          <button type="button" class="ws-main" data-activate-ws="${escapeHtml(w.id)}">
-            <div class="ws-name">${escapeHtml(w.name)}</div>
-            <div class="ws-path">${escapeHtml(w.path)}</div>
-          </button>
-          <div class="workspace-actions">
+      const actions = locked
+        ? ''
+        : `<div class="workspace-actions">
             <button type="button" data-edit-ws="${escapeHtml(w.id)}" title="编辑">✎</button>
             <button type="button" class="danger" data-del-ws="${escapeHtml(w.id)}" title="删除">×</button>
-          </div>
+          </div>`
+      return `
+        <li class="workspace-item ${active}" data-ws-id="${escapeHtml(w.id)}">
+          <button type="button" class="ws-main" data-activate-ws="${escapeHtml(w.id)}" ${locked ? 'disabled' : ''}>
+            <div class="ws-name">${escapeHtml(w.name)}${locked ? '（已锁定）' : ''}</div>
+            <div class="ws-path">${escapeHtml(w.path)}</div>
+          </button>
+          ${actions}
         </li>
       `
     })
@@ -707,6 +864,10 @@ function closeWorkspaceModal() {
 }
 
 async function saveWorkspace() {
+  if (state.workspacesLocked) {
+    alert('公网模式下输出目录已锁定')
+    return
+  }
   const name = els.wsNameInput.value.trim()
   const folderPath = els.wsPathInput.value.trim()
   if (!folderPath) {
@@ -718,18 +879,16 @@ async function saveWorkspace() {
   try {
     let res
     if (state.editingWorkspaceId) {
-      res = await fetch(
+      res = await apiFetch(
         `/api/workspaces/${encodeURIComponent(state.editingWorkspaceId)}`,
         {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ name: name || undefined, path: folderPath }),
         },
       )
     } else {
-      res = await fetch('/api/workspaces', {
+      res = await apiFetch('/api/workspaces', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, path: folderPath }),
       })
     }
@@ -775,7 +934,7 @@ els.workspaceList?.addEventListener('click', async (e) => {
     if (!id) return
     if (!confirm('删除该输出目录配置？（不会删除磁盘上的文件）')) return
     try {
-      const res = await fetch(`/api/workspaces/${encodeURIComponent(id)}`, {
+      const res = await apiFetch(`/api/workspaces/${encodeURIComponent(id)}`, {
         method: 'DELETE',
       })
       const data = await res.json().catch(() => ({}))
@@ -795,10 +954,11 @@ els.workspaceList?.addEventListener('click', async (e) => {
 
   const activate = e.target.closest('[data-activate-ws]')
   if (activate) {
+    if (state.workspacesLocked) return
     const id = activate.getAttribute('data-activate-ws')
     if (!id || id === state.activeWorkspaceId) return
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/workspaces/${encodeURIComponent(id)}/activate`,
         { method: 'POST' },
       )
@@ -835,9 +995,8 @@ async function sendMessage(raw) {
   setStatus('thinking')
 
   try {
-    const res = await fetch('/api/chat', {
+    const res = await apiFetch('/api/chat', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message, sessionId: state.sessionId }),
     })
 
@@ -995,6 +1154,11 @@ els.suggestions?.addEventListener('click', (e) => {
 
 /* ── Boot ───────────────────────────────────────────────── */
 async function boot() {
+  // 无鉴权时直接显示主界面；有鉴权则先过门禁
+  const ok = await ensureAuthorized()
+  if (!ok) return
+
+  hideAuthGate()
   await loadMeta()
   await loadWorkspaces()
   await loadSessions()
@@ -1009,7 +1173,12 @@ async function boot() {
   setStatus('ready')
 }
 
+// 初始隐藏主界面，避免未登录闪屏
+if (els.app) els.app.hidden = true
+document.body.classList.add('auth-locked')
+
 boot().catch((err) => {
   console.error(err)
+  hideAuthGate()
   appendError('初始化失败：' + (err.message || String(err)))
 })

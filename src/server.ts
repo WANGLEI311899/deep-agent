@@ -3,8 +3,10 @@
  * - 多会话历史
  * - SSE 流式对话 + 工具调用事件
  * - HITL 弹窗确认（写文件 / 高风险）
+ * - 可选访问口令 / 公网模式 / 限流
  *
  * 运行：npm run ui
+ * 生产：npm start（需先 build，并设置 ACCESS_TOKEN + PUBLIC_MODE）
  */
 import 'dotenv/config'
 import http from 'http'
@@ -20,8 +22,19 @@ import {
 } from './sessions.js'
 import { WorkspaceStore } from './workspace-store.js'
 import type { HitlRequestMeta } from './hitl.js'
+import {
+  assertDeployConfig,
+  deployConfig,
+  isAuthEnabled,
+} from './deploy-config.js'
+import {
+  isAuthorized,
+  rejectRateLimited,
+  rejectUnauthorized,
+} from './auth.js'
 
-const PORT = Number(process.env.PORT ?? 5173)
+const PORT = deployConfig.port
+const HOST = deployConfig.host
 const PUBLIC_DIR = path.resolve(process.cwd(), 'web/public')
 
 const store = new SessionStore()
@@ -413,6 +426,10 @@ async function handleMeta(res: http.ServerResponse): Promise<void> {
     workspace: workspaces.snapshot(),
     outputPath: current.getOutputPath(),
     activeWorkspace: activeWs,
+    authRequired: isAuthEnabled(),
+    publicMode: deployConfig.publicMode,
+    /** 公网模式下禁止自定义任意本机路径 */
+    workspacesLocked: deployConfig.publicMode,
   })
 }
 
@@ -427,6 +444,16 @@ async function handleFiles(res: http.ServerResponse): Promise<void> {
   })
 }
 
+function rejectPublicWorkspaceMutation(res: http.ServerResponse): boolean {
+  if (!deployConfig.publicMode) return false
+  sendJson(res, 403, {
+    error:
+      '公网模式下已锁定输出目录（仅允许服务器默认 output），禁止配置任意本机路径。',
+    code: 'WORKSPACES_LOCKED',
+  })
+  return true
+}
+
 async function handleWorkspaces(
   method: string,
   url: string,
@@ -434,11 +461,15 @@ async function handleWorkspaces(
   res: http.ServerResponse,
 ): Promise<boolean> {
   if (method === 'GET' && url === '/api/workspaces') {
-    sendJson(res, 200, workspaces.snapshot())
+    sendJson(res, 200, {
+      ...workspaces.snapshot(),
+      locked: deployConfig.publicMode,
+    })
     return true
   }
 
   if (method === 'POST' && url === '/api/workspaces') {
+    if (rejectPublicWorkspaceMutation(res)) return true
     const body = JSON.parse((await readBody(req)) || '{}') as {
       name?: string
       path?: string
@@ -459,6 +490,7 @@ async function handleWorkspaces(
   if (one) {
     const id = decodeURIComponent(one[1])
     if (method === 'PUT' || method === 'PATCH') {
+      if (rejectPublicWorkspaceMutation(res)) return true
       const body = JSON.parse((await readBody(req)) || '{}') as {
         name?: string
         path?: string
@@ -472,6 +504,7 @@ async function handleWorkspaces(
       return true
     }
     if (method === 'DELETE') {
+      if (rejectPublicWorkspaceMutation(res)) return true
       workspaces.remove(id)
       await applyActiveWorkspace()
       sendJson(res, 200, { ok: true, workspace: workspaces.snapshot() })
@@ -481,6 +514,7 @@ async function handleWorkspaces(
 
   const activate = url.match(/^\/api\/workspaces\/([^/]+)\/activate$/)
   if (method === 'POST' && activate) {
+    if (rejectPublicWorkspaceMutation(res)) return true
     const id = decodeURIComponent(activate[1])
     const folder = workspaces.setActive(id)
     await applyActiveWorkspace()
@@ -501,7 +535,10 @@ function matchRoute(
 const server = http.createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*')
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS')
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'Content-Type, Authorization, X-Access-Token',
+  )
 
   if (req.method === 'OPTIONS') {
     res.writeHead(204)
@@ -513,6 +550,31 @@ const server = http.createServer(async (req, res) => {
   const method = req.method ?? 'GET'
 
   try {
+    // 健康检查：平台探活用，不要求口令
+    if (method === 'GET' && url === '/api/health') {
+      sendJson(res, 200, {
+        ok: true,
+        publicMode: deployConfig.publicMode,
+        authRequired: isAuthEnabled(),
+      })
+      return
+    }
+
+    // 鉴权探测：前端判断是否需要登录；不要求已登录
+    if (method === 'GET' && url === '/api/auth/status') {
+      sendJson(res, 200, {
+        authRequired: isAuthEnabled(),
+        publicMode: deployConfig.publicMode,
+        authorized: isAuthorized(req),
+      })
+      return
+    }
+
+    // 所有其它 /api/* 需要口令（若已配置 ACCESS_TOKEN）
+    if (url.startsWith('/api/')) {
+      if (rejectUnauthorized(req, res)) return
+    }
+
     if (method === 'GET' && url === '/api/meta') {
       await handleMeta(res)
       return
@@ -582,6 +644,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (method === 'POST' && url === '/api/chat') {
+      if (rejectRateLimited(req, res)) return
       await handleChat(req, res)
       return
     }
@@ -616,6 +679,8 @@ const server = http.createServer(async (req, res) => {
 })
 
 async function main() {
+  assertDeployConfig()
+
   if (!fs.existsSync(PUBLIC_DIR)) {
     throw new Error(`静态资源目录不存在：${PUBLIC_DIR}`)
   }
@@ -643,11 +708,14 @@ async function main() {
   })
 
   const active = workspaces.getActive()
-  server.listen(PORT, () => {
+  server.listen(PORT, HOST, () => {
     console.log('')
     console.log('═'.repeat(50))
     console.log(`  DeepAgent UI 已启动`)
-    console.log(`  打开浏览器：http://localhost:${PORT}`)
+    console.log(`  本地访问：http://localhost:${PORT}`)
+    console.log(`  监听地址：${HOST}:${PORT}`)
+    console.log(`  公网模式：${deployConfig.publicMode ? '是（目录已锁定）' : '否'}`)
+    console.log(`  访问口令：${isAuthEnabled() ? '已启用' : '未设置（仅适合本机）'}`)
     console.log(`  当前输出目录：${active.path}`)
     console.log(`  会话数：${store.list().length}（已持久化）`)
     console.log('═'.repeat(50))

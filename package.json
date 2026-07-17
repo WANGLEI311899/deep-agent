@@ -9,6 +9,7 @@
     "test": "npm run build && node --test tests/*.test.mjs",
     "dev": "npm run build && node scripts/run-demo.mjs index.mjs",
     "ui": "npm run build && node scripts/run-demo.mjs server.mjs",
+    "start": "node dist/server.mjs",
     "demo:basic": "npm run build && node scripts/run-demo.mjs",
     "demo:search": "npm run build && node scripts/run-demo.mjs demo-search.mjs",
     "demo:multi": "npm run build && node dist/demo-multi-agent.mjs"
