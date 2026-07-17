@@ -18,6 +18,10 @@ import {
 } from './hitl.js'
 import { type Skill, loadSkills, buildSkillsPrompt } from './skill-loader.js'
 import type { ToolCallEvent, ToolStatus } from './sessions.js'
+import {
+  OpenMeteoWeather,
+  extractWeatherLocation,
+} from './tools/open-meteo-weather.js'
 
 export interface AgentConfig {
   name: string
@@ -80,6 +84,7 @@ export class DeepAgent {
   private skills: Skill[] = []
   private sandbox: SandboxContent | null = null
   private conversationHistory: AgentMessage[] = []
+  private weather = new OpenMeteoWeather()
 
   constructor(config: AgentConfig) {
     this.config = {
@@ -138,7 +143,7 @@ export class DeepAgent {
     console.log(`${'='.repeat(50)}\n`)
   }
 
-  private buildSystemPrompt(): string {
+  private buildSystemPrompt(externalContext = ''): string {
     const skillsSection = buildSkillsPrompt(this.skills)
     const sandboxSection = this.sandbox
       ? `\n## 工作区信息\n当前输出目录（绝对路径）：${this.sandbox.outputPath}\n所有通过 filename 代码块写出的文件都会写入此目录（可含子目录）。\n用户若提到「写到桌面 / 某文件夹」，你只需用相对文件名写出即可，系统会落到当前输出目录。`
@@ -160,6 +165,8 @@ ${sandboxSection}
 文件内容
 \`\`\`
 - 使用中文回复
+
+${externalContext ? `\n## 本轮可信工具数据\n${externalContext}\n请基于工具数据回答，并注明数据来源和观测时间；不要编造工具未返回的信息。` : ''}
 
 ${this.config.systemPrompt}`
   }
@@ -412,6 +419,37 @@ ${this.config.systemPrompt}`
     })
 
     // LLM 生成
+    // 天气属于时效性信息，命中意图后先查询真实数据，再交给模型组织回答。
+    let externalContext = ''
+    const weatherLocation = extractWeatherLocation(userMessage)
+    if (weatherLocation) {
+      const weatherToolId = randomUUID()
+      this.emitTool(tools, onTool, {
+        id: weatherToolId,
+        name: 'weather_lookup',
+        title: `查询 ${weatherLocation} 天气`,
+        status: 'running',
+        input: { location: weatherLocation, provider: 'Open-Meteo' },
+      })
+      try {
+        const weather = await this.weather.getWeather(weatherLocation)
+        externalContext = JSON.stringify(weather)
+        this.finishTool(tools, onTool, weatherToolId, 'success', {
+          name: 'weather_lookup',
+          title: `${weather.location} 天气查询完成`,
+          output: weather,
+        })
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        externalContext = `天气工具调用失败：${message}。请明确告知用户暂时无法获取实时天气。`
+        this.finishTool(tools, onTool, weatherToolId, 'error', {
+          name: 'weather_lookup',
+          title: `${weatherLocation} 天气查询失败`,
+          output: { error: message },
+        })
+      }
+    }
+
     const genId = randomUUID()
     this.emitTool(tools, onTool, {
       id: genId,
@@ -433,7 +471,7 @@ ${this.config.systemPrompt}`
         temperature: this.config.temperature,
         stream: true,
         messages: [
-          { role: 'system', content: this.buildSystemPrompt() },
+          { role: 'system', content: this.buildSystemPrompt(externalContext) },
           ...this.conversationHistory,
         ],
       })
