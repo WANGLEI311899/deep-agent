@@ -1,5 +1,5 @@
 /**
- * DeepAgent Web UI 服务
+ * deepCodex Web UI 服务
  * - 多会话历史
  * - SSE 流式对话 + 工具调用事件
  * - HITL 弹窗确认（写文件 / 高风险）
@@ -13,7 +13,7 @@ import http from 'http'
 import fs from 'fs'
 import path from 'path'
 import { randomUUID } from 'crypto'
-import { createAgent, type DeepAgent } from './agent.js'
+import { createAgent, type deepCodex } from './agent.js'
 import {
   SessionStore,
   type Session,
@@ -39,7 +39,7 @@ const PUBLIC_DIR = path.resolve(process.cwd(), 'web/public')
 
 const store = new SessionStore()
 const workspaces = new WorkspaceStore()
-let agent: DeepAgent | null = null
+let agent: deepCodex | null = null
 /** sessionId -> busy */
 const busySessions = new Set<string>()
 
@@ -57,7 +57,7 @@ const pendingHitl = new Map<string, PendingHitl>()
 const HITL_TIMEOUT_MS = 5 * 60 * 1000
 
 const SYSTEM_PROMPT = `
-你是 DeepAgent，一个专业的前端 + AI 全栈智能体，由 DeepSeek 驱动。
+你是 deepCodex，一个专业的前端 + AI 全栈智能体，由 DeepSeek 驱动。
 你擅长：
 - TypeScript / Vue3 / React 前端开发
 - LangChain / Deep Agent AI 应用开发
@@ -70,12 +70,12 @@ const SYSTEM_PROMPT = `
 - 每次先简单说明你打算怎么做，再给出结果
 `
 
-async function ensureAgent(): Promise<DeepAgent> {
+async function ensureAgent(): Promise<deepCodex> {
   if (agent) return agent
   const active = workspaces.getActive()
   agent = await createAgent({
-    name: 'DeepAgent',
-    skillDir: '.deepagent/skills',
+    name: 'deepCodex',
+    skillDir: '.deepcodex/skills',
     sandbox: {
       workspacePath: process.cwd(),
       outputPath: active.path,
@@ -419,7 +419,7 @@ async function handleMeta(res: http.ServerResponse): Promise<void> {
   }))
   const activeWs = workspaces.getActive()
   sendJson(res, 200, {
-    name: 'DeepAgent',
+    name: 'deepCodex',
     model: current.getModel(),
     skills,
     activeSessionId: store.getActiveId(),
@@ -685,7 +685,7 @@ async function main() {
     throw new Error(`静态资源目录不存在：${PUBLIC_DIR}`)
   }
 
-  console.log('🚀 正在初始化 DeepAgent...')
+  console.log('🚀 正在初始化 deepCodex...')
   await ensureAgent()
   // 无持久化会话时再创建空会话
   store.ensureActive()
@@ -711,7 +711,7 @@ async function main() {
   server.listen(PORT, HOST, () => {
     console.log('')
     console.log('═'.repeat(50))
-    console.log(`  DeepAgent UI 已启动`)
+    console.log(`  deepCodex UI 已启动`)
     console.log(`  本地访问：http://localhost:${PORT}`)
     console.log(`  监听地址：${HOST}:${PORT}`)
     console.log(`  公网模式：${deployConfig.publicMode ? '是（目录已锁定）' : '否'}`)

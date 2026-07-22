@@ -1,6 +1,6 @@
 /**
  * Skill 加载器
- * 扫描 .deepagent/skills 目录，读取所有 .skill.md 文件并解析成结构化数据
+ * 扫描 .deepcodex/skills 目录，读取所有 .skill.md 文件并解析成结构化数据
  * Agent 启动时调用，把解析结果拼入 System Prompt
  */
 

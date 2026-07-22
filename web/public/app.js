@@ -1,5 +1,5 @@
 /**
- * DeepAgent Web UI
+ * deepCodex Web UI
  * - 多会话历史
  * - SSE 流式 + 工具调用时间线
  * - HITL 弹窗确认
@@ -7,7 +7,7 @@
 
 const $ = (sel, root = document) => root.querySelector(sel)
 
-const TOKEN_KEY = 'deepagent_access_token'
+const TOKEN_KEY = 'deepcodex_access_token'
 
 const els = {
   app: $('.app'),
@@ -423,6 +423,15 @@ function mountToolCard(toolsEl, tool) {
   } else {
     toolsEl.insertAdjacentHTML('beforeend', html)
   }
+
+  // 同步执行步骤数量，方便折叠状态下快速判断智能体做了多少工作。
+  const panel = toolsEl.closest('.execution-panel')
+  const count = toolsEl.querySelectorAll('.tool-card').length
+  const countEl = panel?.querySelector('[data-execution-count]')
+  if (countEl) countEl.textContent = `${count} 步`
+  if (panel && (tool.status === 'running' || tool.status === 'waiting_approval' || tool.status === 'error')) {
+    panel.open = true
+  }
 }
 
 els.messages.addEventListener('click', (e) => {
@@ -467,10 +476,19 @@ function appendAssistantShell(messageId, { streaming = true } = {}) {
   row.innerHTML = `
     <div class="msg-avatar">DA</div>
     <div class="msg-body">
-      <div class="msg-role">DeepAgent</div>
-      <div class="tool-timeline"></div>
-      <div class="msg-content md ${streaming ? 'streaming' : ''}"></div>
+      <div class="msg-role"><span>deepCodex</span><span class="assistant-state">${streaming ? '正在处理' : '已完成'}</span></div>
+      <section class="result-panel">
+        <div class="result-label">结果</div>
+        <div class="msg-content md ${streaming ? 'streaming' : ''}"></div>
+      </section>
       <div class="msg-meta" hidden></div>
+      <details class="execution-panel" ${streaming ? 'open' : ''}>
+        <summary>
+          <span>执行过程</span>
+          <span class="execution-count" data-execution-count>0 步</span>
+        </summary>
+        <div class="tool-timeline"></div>
+      </details>
     </div>
   `
   els.messages.appendChild(row)
@@ -478,6 +496,8 @@ function appendAssistantShell(messageId, { streaming = true } = {}) {
     row,
     contentEl: row.querySelector('.msg-content'),
     toolsEl: row.querySelector('.tool-timeline'),
+    executionEl: row.querySelector('.execution-panel'),
+    stateEl: row.querySelector('.assistant-state'),
     metaEl: row.querySelector('.msg-meta'),
     tools: new Map(),
   }
@@ -1086,6 +1106,9 @@ async function sendMessage(raw) {
           }
           if (payload.title) els.sessionTitle.textContent = payload.title
           if (payload.sessionId) state.sessionId = payload.sessionId
+          // 输出完成后把执行细节收起，让最终结果成为页面主角。
+          if (assistant.executionEl) assistant.executionEl.open = false
+          if (assistant.stateEl) assistant.stateEl.textContent = '已完成'
           await loadSessions()
           setStatus('done')
         } else if (event === 'error') {
