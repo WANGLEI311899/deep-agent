@@ -59,6 +59,59 @@ final result: passed
 
 ---
 
+# Design QA — 微信式左右对话（2026-07-22）
+
+- Source visual truth: 本轮用户提供的桌面端对话截图（无本地文件路径）
+- Implementation screenshot: unavailable
+- Viewport: 参考图约 2048 × 1342；实现包含桌面端和 `max-width: 860px` 移动端布局
+- Source pixels: 2048 × 1342（会话附件显示尺寸）
+- Implementation pixels / CSS size / density: unavailable
+- State: 用户消息、模型流式回复、执行过程和固定输入框
+
+## Full-view comparison evidence
+
+当前浏览器控制通道不可用，无法捕获本地实现并与参考图合成同视口对比。代码已将用户行反向排列到右侧，并保持模型回复、流式光标和执行过程在左侧，但不能仅依据代码判定视觉一致。
+
+## Focused region comparison evidence
+
+未能捕获用户气泡、模型回复头部和移动端断点的渲染截图，因此无法检查实际折行、气泡宽度、头像基线以及长 Markdown 内容的视觉平衡。
+
+## Findings
+
+- [P2] 缺少浏览器渲染证据
+  - Location: 对话消息区。
+  - Evidence: 有参考截图和完成构建的实现，但没有同状态实现截图。
+  - Impact: 无法确认不同消息长度下的右对齐效果及移动端是否出现拥挤。
+  - Fix: 浏览器控制恢复后，在桌面端和 390px 移动端分别发送一条短消息与一条长消息，捕获流式生成状态并与参考图对比。
+
+## Required fidelity surfaces
+
+- Fonts and typography: 保留现有 Outfit 与中文系统字体、字号和 Markdown 排版；渲染待检查。
+- Spacing and layout rhythm: 用户消息右侧排列、模型消息左侧排列，并对移动端缩小头像与间距；渲染待检查。
+- Colors and visual tokens: 用户气泡使用现有浅绿色语义色，模型结果面板沿用白色卡片；实际对比度待检查。
+- Image quality and asset fidelity: 本次对话布局不新增图片资产，沿用文字头像。
+- Copy and content: 未改变消息内容、状态文案、工具过程或 SSE 流式数据。
+
+## Comparison history
+
+- 本轮无法取得浏览器截图，尚未开始有效的视觉对比迭代。
+
+## Implementation checklist
+
+- [x] 用户消息与头像靠右展示。
+- [x] 模型回复与头像靠左展示。
+- [x] 保留流式光标、Markdown、工具过程和历史消息渲染。
+- [x] 增加移动端响应式间距。
+- [ ] 补充桌面与移动端浏览器截图验证。
+
+## Follow-up polish
+
+- 根据真实截图微调长消息最大宽度和头像与气泡的垂直对齐。
+
+final result: blocked
+
+---
+
 # Design QA — 职决参考主题（2026-07-21）
 
 - Source visual truth: 本轮对话中用户提供的桌面端参考截图（无本地文件路径）

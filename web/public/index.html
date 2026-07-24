@@ -69,16 +69,20 @@
           </ul>
         </div>
 
-        <div class="sidebar-section">
+        <!-- 本地输出目录：放在侧栏主区域，便于随时查看和切换当前写入位置。 -->
+        <div class="sidebar-section workspace-section">
           <div class="section-head">
-            <div class="section-label">输出目录</div>
-            <button class="btn-tiny" id="btnAddWorkspace" type="button" title="添加目录">+</button>
+            <div>
+              <div class="section-label">输出目录</div>
+              <div class="section-subtitle">生成文件将保存到当前目录</div>
+            </div>
+            <button class="btn-tiny workspace-add-btn" id="btnAddWorkspace" type="button" title="添加本地输出目录" aria-label="添加本地输出目录">+</button>
           </div>
           <ul class="workspace-list" id="workspaceList">
             <li class="file-item muted">加载中…</li>
           </ul>
           <div class="output-path-pill" id="outputPathPill">
-            <strong>写入位置</strong>
+            <strong><span class="path-status-dot" aria-hidden="true"></span>当前写入位置</strong>
             <span id="outputPathText">—</span>
           </div>
         </div>

@@ -457,7 +457,7 @@ function appendUserMessage(text) {
   const row = document.createElement('div')
   row.className = 'msg user'
   row.innerHTML = `
-    <div class="msg-avatar">你</div>
+    <div class="msg-avatar"><img src="/assets/avatars/user-avatar-v3.png" alt="用户头像" /></div>
     <div class="msg-body">
       <div class="msg-role">You</div>
       <div class="msg-content"></div>
@@ -474,7 +474,7 @@ function appendAssistantShell(messageId, { streaming = true } = {}) {
   row.className = 'msg assistant'
   row.dataset.messageId = messageId || ''
   row.innerHTML = `
-    <div class="msg-avatar">DA</div>
+    <div class="msg-avatar"><img src="/assets/avatars/deepcodex-avatar.png" alt="deepCodex 头像" /></div>
     <div class="msg-body">
       <div class="msg-role"><span>deepCodex</span><span class="assistant-state">${streaming ? '正在处理' : '已完成'}</span></div>
       <section class="result-panel">
@@ -845,7 +845,11 @@ function renderWorkspaceList() {
       return `
         <li class="workspace-item ${active}" data-ws-id="${escapeHtml(w.id)}">
           <button type="button" class="ws-main" data-activate-ws="${escapeHtml(w.id)}" ${locked ? 'disabled' : ''}>
-            <div class="ws-name">${escapeHtml(w.name)}${locked ? '（已锁定）' : ''}</div>
+            <div class="ws-name">
+              <span class="ws-folder-icon" aria-hidden="true"></span>
+              <span>${escapeHtml(w.name)}${locked ? '（已锁定）' : ''}</span>
+              ${active ? '<span class="ws-active-label">使用中</span>' : ''}
+            </div>
             <div class="ws-path">${escapeHtml(w.path)}</div>
           </button>
           ${actions}
