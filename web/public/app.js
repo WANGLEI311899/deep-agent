@@ -386,7 +386,7 @@ function renderToolCard(tool) {
   const status = tool.status || 'pending'
   const open = status === 'waiting_approval' || status === 'error'
   return `
-    <div class="tool-card ${open ? 'open' : ''}" data-tool-id="${escapeHtml(tool.id)}" data-status="${escapeHtml(status)}">
+    <div class="tool-card ${open ? 'open' : ''}" data-tool-id="${escapeHtml(tool.id)}" data-tool-name="${escapeHtml(tool.name)}" data-status="${escapeHtml(status)}">
       <button type="button" class="tool-head" data-tool-toggle>
         <span class="tool-icon">${escapeHtml(toolIcon(tool.name))}</span>
         <span class="tool-main">
@@ -747,7 +747,7 @@ async function loadMeta() {
     const res = await apiFetch('/api/meta')
     if (!res.ok) throw new Error(`meta ${res.status}`)
     const data = await res.json()
-    els.modelPill.textContent = data.model || 'deepseek-chat'
+    els.modelPill.textContent = data.model || 'deepseek-v4-flash'
     state.publicMode = Boolean(data.publicMode)
     state.workspacesLocked = Boolean(data.workspacesLocked || data.publicMode)
     applyWorkspaceLockUi()

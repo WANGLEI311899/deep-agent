@@ -1,5 +1,52 @@
 # Design QA — Outcome First Workspace
 
+## 执行工具胶囊标签（2026-07-25）
+
+- Source visual truth: 本轮用户提供的执行过程截图（会话附件，无本地文件路径）
+- Implementation screenshot: unavailable（本地浏览器页面读取连续超时）
+- Viewport: 参考截图 2048 × 571；实现沿用当前桌面端响应式布局
+- Source pixels: 2048 × 571
+- Implementation pixels / CSS size / density: unavailable
+- State: 已完成的 `skill_scan` 与展开的 `weather_lookup` 执行卡片
+
+### Full-view comparison evidence
+
+无法取得浏览器渲染截图，因此未进行有效的全视图并排比较。代码已为执行卡片补充工具类型标记，并仅将 `skill_scan` 与 `weather_lookup` 的标识改为侧栏“使用中”同色系胶囊。
+
+### Focused region comparison evidence
+
+参考图中重点区域为 `Skill`、`WE` 与左侧“使用中”标签。实现统一使用浅绿色背景 `#eff5e9`、深绿色文字 `#54784b`、圆角、较轻字重和自适应宽度；浏览器实际像素尺寸尚未捕获。
+
+### Findings
+
+- [P2] 缺少浏览器渲染证据
+  - Location: 执行过程中的 Skill / WE 标签。
+  - Evidence: 源截图可见，但本地页面读取连续超时，无法取得实现截图。
+  - Impact: 无法确认不同缩放比例下的最终对齐和文字基线。
+  - Fix: 浏览器连接恢复后，打开包含天气执行过程的历史会话并补充同区域截图。
+
+### Required fidelity surfaces
+
+- Fonts and typography: 标签改用产品现有界面字体，10.5px / 600；渲染待检查。
+- Spacing and layout rhythm: 自适应宽度、25px 高度、7px 圆角；渲染待检查。
+- Colors and visual tokens: 与“使用中”保持 `#54784b` / `#eff5e9`。
+- Image quality and asset fidelity: 本次不涉及图片资产。
+- Copy and content: 保留 `Skill` 与 `WE` 原文，不改变工具标题和状态。
+
+### Primary interactions and console
+
+- 执行卡片展开/收起逻辑未修改。
+- JavaScript 语法检查与项目构建通过。
+- 浏览器控制台检查因页面读取超时而未完成。
+
+### Comparison history
+
+- 首轮：完成代码对齐；浏览器截图验证受阻，未进入视觉迭代。
+
+final result: blocked
+
+---
+
 - Source visual truth: `C:\Users\汪蕾\.codex\generated_images\019f6de2-f5ae-7490-82f2-a79e2fa2071e\exec-37566e7d-b57d-494c-8694-3a6931fa40e1.png`
 - Implementation screenshot: `D:\newProgrom\deep-agent-demo\output\design-audit\04-outcome-first-final.png`
 - Side-by-side evidence: `D:\newProgrom\deep-agent-demo\output\design-audit\05-side-by-side-comparison.png`

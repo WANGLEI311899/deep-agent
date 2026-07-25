@@ -1027,6 +1027,26 @@ ul {
   background: #fee2e2;
 }
 
+/*
+ * Skill 与天气工具使用和侧栏“使用中”一致的胶囊标签。
+ * 工具类型样式独立于执行状态，完成或运行过程中都保持统一识别。
+ */
+.tool-card[data-tool-name='skill_scan'] .tool-icon,
+.tool-card[data-tool-name='weather_lookup'] .tool-icon {
+  width: auto;
+  min-width: 34px;
+  height: 25px;
+  padding: 2px 8px;
+  border-radius: 7px;
+  color: #54784b;
+  background: #eff5e9;
+  font-family: var(--font);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+
 .tool-main {
   flex: 1;
   min-width: 0;

@@ -89,7 +89,8 @@ export class deepCodex {
   constructor(config: AgentConfig) {
     this.config = {
       name: config.name,
-      model: config.model ?? process.env.DEEPSEEK_MODEL ?? 'deepseek-chat',
+      // DeepSeek 已停用旧模型别名，默认使用新的通用对话模型名称。
+      model: config.model ?? process.env.DEEPSEEK_MODEL ?? 'deepseek-v4-flash',
       apiKey: config.apiKey ?? process.env.DEEPSEEK_API_KEY ?? '',
       temperature:
         config.temperature ?? Number(process.env.DEEPSEEK_TEMPERATURE ?? 0.7),

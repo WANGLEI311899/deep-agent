@@ -142,7 +142,7 @@ web/public/           # 前端静态页面
 | 变量 | 默认 | 说明 |
 |------|------|------|
 | `DEEPSEEK_API_KEY` | — | 必填 |
-| `DEEPSEEK_MODEL` | `deepseek-chat` | 模型名 |
+| `DEEPSEEK_MODEL` | `deepseek-v4-flash` | 模型名；复杂推理可使用 `deepseek-v4-pro` |
 | `DEEPSEEK_TEMPERATURE` | `0.7` | 温度 |
 | `DEEPSEEK_MAX_HISTORY` | `20` | 模型上下文消息条数上限 |
 | `PORT` | `5173` | Web 端口 |

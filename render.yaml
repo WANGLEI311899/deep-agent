@@ -19,6 +19,6 @@ services:
       - key: ACCESS_TOKEN
         generateValue: true
       - key: DEEPSEEK_MODEL
-        value: deepseek-chat
+        value: deepseek-v4-flash
       - key: RATE_LIMIT_PER_MIN
         value: "30"
