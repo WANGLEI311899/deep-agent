@@ -125,12 +125,12 @@ export async function hitlCheckpoint(
   const riskLevel: HitlRiskLevel =
     meta.riskLevel ?? (isHighRisk ? 'high' : isFileWrite ? 'medium' : 'low')
 
-  console.log('\n' + '='.repeat(50))
-  console.log('⚠️  [HITL] 需要人工确认')
-  console.log('='.repeat(50))
-  console.log(`操作描述：${operationDesc}`)
-  console.log(`风险等级：${riskLevel}`)
-  console.log('='.repeat(50))
+  // console.log('\n' + '='.repeat(50))
+  // console.log('⚠️  [HITL] 需要人工确认')
+  // console.log('='.repeat(50))
+  // console.log(`操作描述：${operationDesc}`)
+  // console.log(`风险等级：${riskLevel}`)
+  // console.log('='.repeat(50))
 
   if (autoApprove) {
     console.log('[HITL] 自动同意模式，继续执行...\n')
