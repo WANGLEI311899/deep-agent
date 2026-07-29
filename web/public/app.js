@@ -1117,6 +1117,11 @@ async function sendMessage(raw) {
           setStatus('done')
         } else if (event === 'error') {
           throw new Error(payload.error || '未知错误')
+        } else if (event === 'cancelled') {
+          // 保留已收到的部分输出，方便用户判断是否需要重试。
+          streamView.flush()
+          if (assistant.stateEl) assistant.stateEl.textContent = '已取消'
+          setStatus('ready')
         }
       }
     }

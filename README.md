@@ -151,6 +151,23 @@ web/public/           # 前端静态页面
 | `ACCESS_TOKEN` | — | 访问口令；设置后网页需登录 |
 | `PUBLIC_MODE` | `false` | `true` 时强制口令 + 锁定输出目录 |
 | `RATE_LIMIT_PER_MIN` | `30` | 每 IP 每分钟对话次数上限 |
+| `ACCESS_TOKENS` | 空 | 多用户口令 JSON，例如 `{"alice":"token-a"}`；会话与输出目录按用户隔离 |
+| `AGENT_REQUEST_TIMEOUT_MS` | `120000` | 单轮 Agent 请求总超时；断连时也会取消 |
+| `AGENT_TOOL_TIMEOUT_MS` | `15000` | 单个工具默认超时 |
+| `AGENT_MAX_TOOLS_PER_TURN` | `3` | 单轮最多自动匹配工具数 |
+
+### 多用户模式
+
+`ACCESS_TOKEN` 对应 `owner` 管理用户，并保留自定义本机工作区能力。需要给多人独立使用时，
+配置 `ACCESS_TOKENS`，每个用户使用不同口令：
+
+```env
+ACCESS_TOKEN=owner-长随机口令
+ACCESS_TOKENS={"alice":"alice-长随机口令","bob":"bob-长随机口令"}
+```
+
+不同用户只能读取和删除自己的会话，普通用户的生成文件写入
+`output/users/<userId>`，不能查看或修改 owner 的工作区配置。
 
 ## 安全提示
 

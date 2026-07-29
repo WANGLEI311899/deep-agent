@@ -28,6 +28,7 @@ import {
   isAuthEnabled,
 } from './deploy-config.js'
 import {
+  getAuthPrincipal,
   isAuthorized,
   rejectRateLimited,
   rejectUnauthorized,
@@ -46,6 +47,7 @@ const busySessions = new Set<string>()
 interface PendingHitl {
   id: string
   sessionId: string
+  userId: string
   operation: string
   meta?: HitlRequestMeta
   resolve: (approved: boolean) => void
@@ -185,10 +187,12 @@ function sessionPublic(session: Session) {
 }
 
 function createHitlWaiter(
+  userId: string,
   sessionId: string,
   operation: string,
   meta: HitlRequestMeta | undefined,
   emit: (payload: unknown) => void,
+  signal: AbortSignal,
 ): Promise<boolean> {
   const id = randomUUID()
   emit({
@@ -201,33 +205,44 @@ function createHitlWaiter(
   })
 
   return new Promise<boolean>((resolve) => {
+    const onAbort = () => {
+      const pending = pendingHitl.get(id)
+      if (pending) pending.resolve(false)
+      else resolve(false)
+    }
     const timer = setTimeout(() => {
       const pending = pendingHitl.get(id)
       if (!pending) return
       pendingHitl.delete(id)
+      signal.removeEventListener('abort', onAbort)
       console.log(`[HITL] 请求 ${id} 超时，默认拒绝`)
       resolve(false)
     }, HITL_TIMEOUT_MS)
 
     pendingHitl.set(id, {
       id,
+      userId,
       sessionId,
       operation,
       meta,
       resolve: (approved) => {
         clearTimeout(timer)
+        signal.removeEventListener('abort', onAbort)
         pendingHitl.delete(id)
         resolve(approved)
       },
       createdAt: Date.now(),
       timer,
     })
+    if (signal.aborted) onAbort()
+    else signal.addEventListener('abort', onAbort, { once: true })
   })
 }
 
 async function handleChat(
   req: http.IncomingMessage,
   res: http.ServerResponse,
+  userId: string,
 ): Promise<void> {
   let body: { message?: string; sessionId?: string } = {}
   try {
@@ -243,11 +258,11 @@ async function handleChat(
     return
   }
 
-  let session = body.sessionId ? store.get(body.sessionId) : undefined
+  let session = body.sessionId ? store.get(body.sessionId, userId) : undefined
   if (!session) {
-    session = store.ensureActive()
+    session = store.ensureActive(userId)
   } else {
-    store.setActive(session.id)
+    store.setActive(session.id, userId)
   }
 
   // 单 Agent 实例：全局同时只允许一轮对话（含跨会话）
@@ -266,8 +281,21 @@ async function handleChat(
 
   busySessions.add(session.id)
   let closed = false
-  req.on('close', () => {
-    closed = true
+  const requestController = new AbortController()
+  const requestTimeoutMs = Number(
+    process.env.AGENT_REQUEST_TIMEOUT_MS ?? 120_000,
+  )
+  const requestTimer = setTimeout(() => {
+    requestController.abort(
+      new Error(`Agent 请求超过 ${requestTimeoutMs}ms，已自动取消。`),
+    )
+  }, requestTimeoutMs)
+  // SSE 响应断开才代表浏览器离开；不能使用请求体的 close 事件判断。
+  res.on('close', () => {
+    if (!res.writableEnded) {
+      closed = true
+      requestController.abort(new Error('客户端已断开连接。'))
+    }
   })
 
   const emit = (event: string, data: unknown) => {
@@ -277,7 +305,12 @@ async function handleChat(
   try {
     const current = await ensureAgent()
     // 每轮对话前同步当前激活的本地输出目录
-    current.setOutputPath(workspaces.getActivePath(), false)
+    // 多用户口令使用独立输出目录；owner/local 继续兼容自定义工作区。
+    const userOutputPath =
+      userId === 'owner' || userId === 'local'
+        ? workspaces.getActivePath()
+        : path.resolve(process.cwd(), 'output', 'users', userId)
+    current.setOutputPath(userOutputPath, false)
     bindSessionHistory(session)
 
     // 本轮对话的 HITL 绑定到当前 SSE
@@ -286,8 +319,13 @@ async function handleChat(
       autoApprove: false,
       confirmFileWrites: true,
       confirmHandler: (operation, meta) =>
-        createHitlWaiter(session!.id, operation, meta, (payload) =>
-          emit('hitl', payload),
+        createHitlWaiter(
+          userId,
+          session!.id,
+          operation,
+          meta,
+          (payload) => emit('hitl', payload),
+          requestController.signal,
         ),
     })
 
@@ -323,6 +361,9 @@ async function handleChat(
     const PERSIST_EVERY_MS = 500
     const result = await current.invokeStream(message, {
       writeToStdout: false,
+      signal: requestController.signal,
+      userId,
+      sessionId: session.id,
       onStatus: (status) => emit('status', { status }),
       onChunk: (delta) => {
         full += delta
@@ -366,10 +407,12 @@ async function handleChat(
     res.end()
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error)
-    console.error('[Server] chat error:', error)
-    emit('error', { error: msg })
+    const cancelled = requestController.signal.aborted
+    console.error(cancelled ? '[Server] chat cancelled:' : '[Server] chat error:', error)
+    emit(cancelled ? 'cancelled' : 'error', { error: msg })
     if (!res.writableEnded) res.end()
   } finally {
+    clearTimeout(requestTimer)
     busySessions.delete(session.id)
     // 清理可能残留的 HITL（连接断开时拒绝）
     for (const [id, p] of pendingHitl) {
@@ -385,6 +428,7 @@ async function handleChat(
 async function handleHitl(
   req: http.IncomingMessage,
   res: http.ServerResponse,
+  userId: string,
 ): Promise<void> {
   let body: { id?: string; approved?: boolean } = {}
   try {
@@ -401,7 +445,7 @@ async function handleHitl(
   }
 
   const pending = pendingHitl.get(id)
-  if (!pending) {
+  if (!pending || pending.userId !== userId) {
     sendJson(res, 404, { error: '确认请求不存在或已过期' })
     return
   }
@@ -410,7 +454,10 @@ async function handleHitl(
   sendJson(res, 200, { ok: true, id, approved: body.approved })
 }
 
-async function handleMeta(res: http.ServerResponse): Promise<void> {
+async function handleMeta(
+  res: http.ServerResponse,
+  userId: string,
+): Promise<void> {
   const current = await ensureAgent()
   const skills = current.getSkills().map((s) => ({
     name: s.name,
@@ -418,29 +465,42 @@ async function handleMeta(res: http.ServerResponse): Promise<void> {
     description: s.description,
   }))
   const activeWs = workspaces.getActive()
+  const ownsGlobalWorkspace = userId === 'owner' || userId === 'local'
   sendJson(res, 200, {
     name: 'deepCodex',
     model: current.getModel(),
     skills,
-    activeSessionId: store.getActiveId(),
-    workspace: workspaces.snapshot(),
+    activeSessionId: store.getActiveId(userId),
+    workspace: ownsGlobalWorkspace ? workspaces.snapshot() : null,
     outputPath: current.getOutputPath(),
-    activeWorkspace: activeWs,
+    activeWorkspace: ownsGlobalWorkspace ? activeWs : null,
     authRequired: isAuthEnabled(),
     publicMode: deployConfig.publicMode,
     /** 公网模式下禁止自定义任意本机路径 */
-    workspacesLocked: deployConfig.publicMode,
+    workspacesLocked: deployConfig.publicMode || !ownsGlobalWorkspace,
   })
 }
 
-async function handleFiles(res: http.ServerResponse): Promise<void> {
+async function handleFiles(
+  res: http.ServerResponse,
+  userId: string,
+): Promise<void> {
   const current = await ensureAgent()
+  if (userId !== 'owner' && userId !== 'local') {
+    current.setOutputPath(
+      path.resolve(process.cwd(), 'output', 'users', userId),
+      false,
+    )
+  }
   const sandbox = current.getSandbox()
   const active = workspaces.getActive()
   sendJson(res, 200, {
     files: sandbox?.listFiles() ?? [],
     outputPath: sandbox?.outputPath ?? active.path,
-    workspace: active,
+    workspace:
+      userId === 'owner' || userId === 'local'
+        ? active
+        : { id: `user-${userId}`, name: '个人输出目录', path: sandbox?.outputPath },
   })
 }
 
@@ -574,13 +634,25 @@ const server = http.createServer(async (req, res) => {
     if (url.startsWith('/api/')) {
       if (rejectUnauthorized(req, res)) return
     }
+    const userId = getAuthPrincipal(req)?.userId ?? 'local'
 
     if (method === 'GET' && url === '/api/meta') {
-      await handleMeta(res)
+      await handleMeta(res, userId)
       return
     }
     if (method === 'GET' && url === '/api/files') {
-      await handleFiles(res)
+      await handleFiles(res, userId)
+      return
+    }
+    if (
+      url.startsWith('/api/workspaces') &&
+      userId !== 'owner' &&
+      userId !== 'local'
+    ) {
+      sendJson(res, 403, {
+        error: '多用户账号使用独立固定输出目录，不能修改全局工作区。',
+        code: 'USER_WORKSPACE_LOCKED',
+      })
       return
     }
     if (await handleWorkspaces(method, url, req, res)) {
@@ -588,54 +660,54 @@ const server = http.createServer(async (req, res) => {
     }
     if (method === 'GET' && url === '/api/sessions') {
       sendJson(res, 200, {
-        sessions: store.list(),
-        activeSessionId: store.getActiveId(),
+        sessions: store.list(userId),
+        activeSessionId: store.getActiveId(userId),
       })
       return
     }
     if (method === 'POST' && url === '/api/sessions') {
-      const session = store.create()
+      const session = store.create(userId)
       sendJson(res, 201, sessionPublic(session))
       return
     }
 
     const getOne = matchRoute(url, /^\/api\/sessions\/([^/]+)$/)
     if (method === 'GET' && getOne) {
-      const session = store.get(decodeURIComponent(getOne[1]))
+      const session = store.get(decodeURIComponent(getOne[1]), userId)
       if (!session) {
         sendJson(res, 404, { error: '会话不存在' })
         return
       }
-      store.setActive(session.id)
+      store.setActive(session.id, userId)
       sendJson(res, 200, sessionPublic(session))
       return
     }
     if (method === 'DELETE' && getOne) {
       const id = decodeURIComponent(getOne[1])
-      const ok = store.delete(id)
+      const ok = store.delete(id, userId)
       if (!ok) {
         sendJson(res, 404, { error: '会话不存在' })
         return
       }
       // 若删光了，自动建一个空会话
-      if (!store.getActiveId()) store.create()
+      if (!store.getActiveId(userId)) store.create(userId)
       sendJson(res, 200, {
         ok: true,
-        activeSessionId: store.getActiveId(),
-        sessions: store.list(),
+        activeSessionId: store.getActiveId(userId),
+        sessions: store.list(userId),
       })
       return
     }
 
     const clearOne = matchRoute(url, /^\/api\/sessions\/([^/]+)\/clear$/)
     if (method === 'POST' && clearOne) {
-      const session = store.get(decodeURIComponent(clearOne[1]))
+      const session = store.get(decodeURIComponent(clearOne[1]), userId)
       if (!session) {
         sendJson(res, 404, { error: '会话不存在' })
         return
       }
       store.clearSession(session)
-      if (store.getActiveId() === session.id) {
+      if (store.getActiveId(userId) === session.id) {
         const current = await ensureAgent()
         current.clearHistory()
       }
@@ -645,16 +717,16 @@ const server = http.createServer(async (req, res) => {
 
     if (method === 'POST' && url === '/api/chat') {
       if (rejectRateLimited(req, res)) return
-      await handleChat(req, res)
+      await handleChat(req, res, userId)
       return
     }
     if (method === 'POST' && url === '/api/hitl') {
-      await handleHitl(req, res)
+      await handleHitl(req, res, userId)
       return
     }
     // 兼容旧 clear：清空当前会话
     if (method === 'POST' && url === '/api/clear') {
-      const session = store.ensureActive()
+      const session = store.ensureActive(userId)
       store.clearSession(session)
       const current = await ensureAgent()
       current.clearHistory()
@@ -688,7 +760,7 @@ async function main() {
   console.log('🚀 正在初始化 deepCodex...')
   await ensureAgent()
   // 无持久化会话时再创建空会话
-  store.ensureActive()
+  store.ensureActive('owner')
 
   const flushSessions = () => {
     try {
@@ -717,7 +789,7 @@ async function main() {
     console.log(`  公网模式：${deployConfig.publicMode ? '是（目录已锁定）' : '否'}`)
     console.log(`  访问口令：${isAuthEnabled() ? '已启用' : '未设置（仅适合本机）'}`)
     console.log(`  当前输出目录：${active.path}`)
-    console.log(`  会话数：${store.list().length}（已持久化）`)
+    console.log(`  owner 会话数：${store.list('owner').length}（已持久化）`)
     console.log('═'.repeat(50))
     console.log('')
   })

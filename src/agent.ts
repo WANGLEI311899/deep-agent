@@ -16,12 +16,10 @@ import {
   hitlCheckpoint,
   isHighRiskOperation,
 } from './hitl.js'
-import { type Skill, loadSkills, buildSkillsPrompt } from './skill-loader.js'
+import { type Skill, loadSkills, SkillRegistry } from './skill-loader.js'
 import type { ToolCallEvent, ToolStatus } from './sessions.js'
-import {
-  OpenMeteoWeather,
-  extractWeatherLocation,
-} from './tools/open-meteo-weather.js'
+import { ToolRegistry } from './tool-registry.js'
+import { createWeatherTool } from './tools/weather-tool.js'
 
 export interface AgentConfig {
   name: string
@@ -58,6 +56,10 @@ export interface StreamOptions {
   onStatus?: (status: string) => void
   onTool?: (tool: ToolCallEvent) => void
   writeToStdout?: boolean
+  /** 客户端断开或任务超时时，统一终止模型和工具调用。 */
+  signal?: AbortSignal
+  userId?: string
+  sessionId?: string
 }
 
 /** 构造完成后的配置，避免业务代码反复处理可选值。 */
@@ -82,9 +84,10 @@ export class deepCodex {
   private client: OpenAI
   private config: ResolvedAgentConfig
   private skills: Skill[] = []
+  private skillRegistry = new SkillRegistry([])
+  private toolRegistry: ToolRegistry
   private sandbox: SandboxContent | null = null
   private conversationHistory: AgentMessage[] = []
-  private weather = new OpenMeteoWeather()
 
   constructor(config: AgentConfig) {
     this.config = {
@@ -107,6 +110,11 @@ export class deepCodex {
         config.maxHistoryMessages ??
         Number(process.env.DEEPSEEK_MAX_HISTORY ?? 20),
     }
+    this.toolRegistry = new ToolRegistry({
+      defaultTimeoutMs: Number(process.env.AGENT_TOOL_TIMEOUT_MS ?? 15_000),
+      maxToolsPerTurn: Number(process.env.AGENT_MAX_TOOLS_PER_TURN ?? 3),
+    })
+    this.toolRegistry.register(createWeatherTool())
 
     if (this.config.maxHistoryMessages < 2) {
       this.config.maxHistoryMessages = 2
@@ -135,6 +143,7 @@ export class deepCodex {
 
     console.log('\n📂 [Agent] 正在加载 Skill 文件...')
     this.skills = loadSkills(this.config.skillDir)
+    this.skillRegistry = new SkillRegistry(this.skills)
     console.log(`[Agent] 共加载 ${this.skills.length} 个 Skill`)
 
     console.log('\n🔒 [Agent] 正在初始化沙箱...')
@@ -144,8 +153,13 @@ export class deepCodex {
     console.log(`${'='.repeat(50)}\n`)
   }
 
-  private buildSystemPrompt(externalContext = ''): string {
-    const skillsSection = buildSkillsPrompt(this.skills)
+  private buildSystemPrompt(
+    externalContext = '',
+    matchedSkills: Skill[] = [],
+  ): string {
+    const skillsSection = this.skillRegistry.buildOverviewPrompt()
+    const executionSection =
+      this.skillRegistry.buildExecutionPrompt(matchedSkills)
     const sandboxSection = this.sandbox
       ? `\n## 工作区信息\n当前输出目录（绝对路径）：${this.sandbox.outputPath}\n所有通过 filename 代码块写出的文件都会写入此目录（可含子目录）。\n用户若提到「写到桌面 / 某文件夹」，你只需用相对文件名写出即可，系统会落到当前输出目录。`
       : ''
@@ -157,6 +171,7 @@ export class deepCodex {
 - 调用相应的 Skill 技能处理专项任务
 - 将结果写入本地文件系统
 ${skillsSection}
+${executionSection}
 ${sandboxSection}
 
 ## 行为准则
@@ -228,17 +243,17 @@ ${this.config.systemPrompt}`
     }
   }
 
+  /** 调用被取消或失败时撤销本轮 user 消息，避免留下不成对的上下文。 */
+  private rollbackPendingUserMessage(userMessage: string): void {
+    const last = this.conversationHistory.at(-1)
+    if (last?.role === 'user' && last.content === userMessage) {
+      this.conversationHistory.pop()
+    }
+  }
+
   /** 粗粒度匹配可能触发的 Skill，用于工具时间线展示 */
   private matchSkills(userMessage: string): Skill[] {
-    const lower = userMessage.toLowerCase()
-    return this.skills.filter((skill) => {
-      const hay = `${skill.name}\n${skill.description}\n${skill.fileName}`.toLowerCase()
-      const tokens = hay
-        .split(/[\s,，。；;：:\n/\\()（）【】\[\]|]+/)
-        .filter((t) => t.length >= 2)
-        .slice(0, 40)
-      return tokens.some((t) => lower.includes(t) || t.includes(lower.slice(0, 8)))
-    })
+    return this.skillRegistry.match(userMessage)
   }
 
   /** 提取模型返回的文件代码块，并在 HITL 放行后写入沙箱。 */
@@ -347,7 +362,15 @@ ${this.config.systemPrompt}`
     userMessage: string,
     options: StreamOptions = {},
   ): Promise<AgentResult> {
-    const { onChunk, onStatus, onTool, writeToStdout = !onChunk } = options
+    const {
+      onChunk,
+      onStatus,
+      onTool,
+      writeToStdout = !onChunk,
+      signal = new AbortController().signal,
+      userId,
+      sessionId,
+    } = options
     const tools: ToolCallEvent[] = []
 
     // 用户消息高风险检查
@@ -419,37 +442,52 @@ ${this.config.systemPrompt}`
       },
     })
 
-    // LLM 生成
-    // 天气属于时效性信息，命中意图后先查询真实数据，再交给模型组织回答。
-    let externalContext = ''
-    const weatherLocation = extractWeatherLocation(userMessage)
-    if (weatherLocation) {
-      const weatherToolId = randomUUID()
+    // 统一工具调度：后续新增搜索、数据库等工具时无需修改 Agent 主流程。
+    const externalContexts: string[] = []
+    const matchedTools = this.toolRegistry.match(userMessage)
+    for (const { tool, input } of matchedTools) {
+      if (signal.aborted) throw signal.reason
+      const toolId = randomUUID()
       this.emitTool(tools, onTool, {
-        id: weatherToolId,
-        name: 'weather_lookup',
-        title: `查询 ${weatherLocation} 天气`,
+        id: toolId,
+        name: tool.name,
+        title: `执行工具：${tool.description}`,
         status: 'running',
-        input: { location: weatherLocation, provider: 'Open-Meteo' },
+        riskLevel: tool.riskLevel,
+        input,
       })
       try {
-        const weather = await this.weather.getWeather(weatherLocation)
-        externalContext = JSON.stringify(weather)
-        this.finishTool(tools, onTool, weatherToolId, 'success', {
-          name: 'weather_lookup',
-          title: `${weather.location} 天气查询完成`,
-          output: weather,
+        const executed = await this.toolRegistry.execute(tool, input, {
+          signal,
+          userId,
+          sessionId,
+        })
+        externalContexts.push(`### ${tool.name}\n${executed.prompt}`)
+        this.finishTool(tools, onTool, toolId, 'success', {
+          name: tool.name,
+          title: `${tool.description}完成`,
+          output: executed.output,
         })
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
-        externalContext = `天气工具调用失败：${message}。请明确告知用户暂时无法获取实时天气。`
-        this.finishTool(tools, onTool, weatherToolId, 'error', {
-          name: 'weather_lookup',
-          title: `${weatherLocation} 天气查询失败`,
+        const cancelled =
+          signal.aborted ||
+          (error instanceof Error && error.name === 'AbortError')
+        externalContexts.push(
+          `### ${tool.name}\n工具调用失败：${message}。请明确告知用户。`,
+        )
+        this.finishTool(tools, onTool, toolId, cancelled ? 'cancelled' : 'error', {
+          name: tool.name,
+          title: `${tool.description}${cancelled ? '已取消' : '失败'}`,
           output: { error: message },
         })
+        if (cancelled) {
+          this.rollbackPendingUserMessage(userMessage)
+          throw error
+        }
       }
     }
+    const externalContext = externalContexts.join('\n\n')
 
     const genId = randomUUID()
     this.emitTool(tools, onTool, {
@@ -466,16 +504,22 @@ ${this.config.systemPrompt}`
 
     let fullContent = ''
     try {
-      const stream = await this.client.chat.completions.create({
-        model: this.config.model,
-        max_tokens: this.config.maxToken,
-        temperature: this.config.temperature,
-        stream: true,
-        messages: [
-          { role: 'system', content: this.buildSystemPrompt(externalContext) },
-          ...this.conversationHistory,
-        ],
-      })
+      const stream = await this.client.chat.completions.create(
+        {
+          model: this.config.model,
+          max_tokens: this.config.maxToken,
+          temperature: this.config.temperature,
+          stream: true,
+          messages: [
+            {
+              role: 'system',
+              content: this.buildSystemPrompt(externalContext, matched),
+            },
+            ...this.conversationHistory,
+          ],
+        },
+        { signal },
+      )
 
       onStatus?.('streaming')
       for await (const chunk of stream) {
@@ -493,9 +537,11 @@ ${this.config.systemPrompt}`
         output: { chars: fullContent.length },
       })
     } catch (error) {
-      this.finishTool(tools, onTool, genId, 'error', {
+      this.rollbackPendingUserMessage(userMessage)
+      const cancelled = signal.aborted
+      this.finishTool(tools, onTool, genId, cancelled ? 'cancelled' : 'error', {
         name: 'llm_generate',
-        title: '模型调用失败',
+        title: cancelled ? '模型调用已取消' : '模型调用失败',
         output: {
           error: error instanceof Error ? error.message : String(error),
         },

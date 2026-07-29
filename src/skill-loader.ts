@@ -129,3 +129,69 @@ ${skillDescriptions}
 如果输入同时符合多个技能，选择最匹配的那个。
 `
 }
+
+/**
+ * Skill 注册与路由。
+ *
+ * 列表提示词只暴露能力概览；命中后才注入完整 Script，避免所有 Skill
+ * 长期占用上下文，也修复旧实现“提示模型执行 Script、却未提供 Script”的问题。
+ */
+export class SkillRegistry {
+  constructor(private readonly skills: Skill[]) {}
+
+  list(): Skill[] {
+    return [...this.skills]
+  }
+
+  match(userMessage: string, maxMatches = 2): Skill[] {
+    const normalized = userMessage.toLowerCase().trim()
+    if (!normalized) return []
+
+    const scored = this.skills
+      .map((skill) => {
+        const source =
+          `${skill.name}\n${skill.description}\n${skill.fileName}`.toLowerCase()
+        const tokens = source
+          .split(/[\s,，。；;：:\n/\\()（）【】[\]|]+/)
+          .map((token) => token.trim())
+          .filter((token) => token.length >= 2)
+        const score = tokens.reduce(
+          (total, token) =>
+            total +
+            (normalized.includes(token)
+              ? Math.min(token.length, 8)
+              : token.includes(normalized.slice(0, 8))
+                ? 1
+                : 0),
+          0,
+        )
+        return { skill, score }
+      })
+      .filter((item) => item.score > 0)
+      .sort((a, b) => b.score - a.score)
+
+    return scored.slice(0, maxMatches).map((item) => item.skill)
+  }
+
+  buildOverviewPrompt(): string {
+    return buildSkillsPrompt(this.skills)
+  }
+
+  buildExecutionPrompt(matched: Skill[]): string {
+    if (!matched.length) return ''
+    const content = matched
+      .map(
+        (skill) => `### ${skill.name}
+来源文件：${skill.fileName}
+触发说明：${skill.description || '未填写'}
+
+#### 执行步骤
+${skill.script || '未填写 Script，请按通用能力处理。'}
+
+${skill.references ? `#### 参考资料\n${skill.references}` : ''}
+${skill.examples ? `#### 示例\n${skill.examples}` : ''}`,
+      )
+      .join('\n\n')
+    return `## 本轮已路由的 Skill\n\n${content}`
+  }
+}

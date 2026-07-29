@@ -51,10 +51,34 @@ export function extractAccessToken(req: IncomingMessage): string {
 }
 
 export function isAuthorized(req: IncomingMessage): boolean {
-  if (!isAuthEnabled()) return true
+  return Boolean(getAuthPrincipal(req))
+}
+
+export interface AuthPrincipal {
+  userId: string
+}
+
+/**
+ * 将访问口令解析为稳定用户身份。
+ * 未开启鉴权的本地模式使用 local 用户；ACCESS_TOKEN 对应 owner 用户。
+ */
+export function getAuthPrincipal(
+  req: IncomingMessage,
+): AuthPrincipal | null {
+  if (!isAuthEnabled()) return { userId: 'local' }
   const provided = extractAccessToken(req)
-  if (!provided) return false
-  return safeEqual(provided, deployConfig.accessToken)
+  if (!provided) return null
+
+  if (
+    deployConfig.accessToken &&
+    safeEqual(provided, deployConfig.accessToken)
+  ) {
+    return { userId: 'owner' }
+  }
+  for (const [userId, token] of Object.entries(deployConfig.userTokens)) {
+    if (safeEqual(provided, token)) return { userId }
+  }
+  return null
 }
 
 /**

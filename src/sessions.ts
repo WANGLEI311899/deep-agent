@@ -47,6 +47,8 @@ export interface SessionSummary {
 
 export interface Session {
   id: string
+  /** 会话所有者；所有读写操作必须带同一 userId。 */
+  userId: string
   title: string
   createdAt: number
   updatedAt: number
@@ -58,7 +60,8 @@ export interface Session {
 }
 
 interface PersistedState {
-  activeId: string | null
+  activeId?: string | null
+  activeIds?: Record<string, string>
   sessions: Session[]
 }
 
@@ -95,7 +98,7 @@ function loadRaw(): PersistedState | null {
     if (!activeId || !sessions.some((s) => s.id === activeId)) {
       activeId = sessions[0].id
     }
-    return { activeId, sessions }
+    return { activeId, activeIds: raw.activeIds, sessions }
   } catch (err) {
     console.warn('[SessionStore] 读取持久化失败，将使用空状态：', err)
     return null
@@ -104,7 +107,7 @@ function loadRaw(): PersistedState | null {
 
 export class SessionStore {
   private sessions = new Map<string, Session>()
-  private activeId: string | null = null
+  private activeIds = new Map<string, string>()
   private saveTimer: ReturnType<typeof setTimeout> | null = null
   private persistEnabled: boolean
 
@@ -113,9 +116,21 @@ export class SessionStore {
     const loaded = this.persistEnabled ? loadRaw() : null
     if (loaded) {
       for (const s of loaded.sessions) {
+        // 旧数据没有 userId，迁移到 owner，避免升级后数据丢失。
+        if (!s.userId) s.userId = 'owner'
         this.sessions.set(s.id, s)
       }
-      this.activeId = loaded.activeId
+      for (const [userId, id] of Object.entries(loaded.activeIds ?? {})) {
+        if (this.sessions.get(id)?.userId === userId) {
+          this.activeIds.set(userId, id)
+        }
+      }
+      if (loaded.activeId && this.sessions.has(loaded.activeId)) {
+        const legacy = this.sessions.get(loaded.activeId)!
+        if (!this.activeIds.has(legacy.userId)) {
+          this.activeIds.set(legacy.userId, legacy.id)
+        }
+      }
       console.log(
         `[SessionStore] 已恢复 ${this.sessions.size} 个会话（${CONFIG_FILE}）`,
       )
@@ -137,7 +152,7 @@ export class SessionStore {
     try {
       fs.mkdirSync(CONFIG_DIR, { recursive: true })
       const state: PersistedState = {
-        activeId: this.activeId,
+        activeIds: Object.fromEntries(this.activeIds),
         sessions: [...this.sessions.values()],
       }
       fs.writeFileSync(CONFIG_FILE, JSON.stringify(state, null, 2), 'utf-8')
@@ -146,10 +161,11 @@ export class SessionStore {
     }
   }
 
-  create(title = '新对话'): Session {
+  create(userId: string, title = '新对话'): Session {
     const now = Date.now()
     const session: Session = {
       id: randomUUID(),
+      userId,
       title,
       createdAt: now,
       updatedAt: now,
@@ -158,37 +174,40 @@ export class SessionStore {
       filesWritten: [],
     }
     this.sessions.set(session.id, session)
-    this.activeId = session.id
+    this.activeIds.set(userId, session.id)
     this.scheduleSave()
     return session
   }
 
-  ensureActive(): Session {
-    if (this.activeId) {
-      const s = this.sessions.get(this.activeId)
-      if (s) return s
+  ensureActive(userId: string): Session {
+    const activeId = this.activeIds.get(userId)
+    if (activeId) {
+      const s = this.sessions.get(activeId)
+      if (s?.userId === userId) return s
     }
-    return this.create()
+    return this.create(userId)
   }
 
-  get(id: string): Session | undefined {
-    return this.sessions.get(id)
+  get(id: string, userId: string): Session | undefined {
+    const session = this.sessions.get(id)
+    return session?.userId === userId ? session : undefined
   }
 
-  getActiveId(): string | null {
-    return this.activeId
+  getActiveId(userId: string): string | null {
+    return this.activeIds.get(userId) ?? null
   }
 
-  setActive(id: string): Session | undefined {
-    const s = this.sessions.get(id)
+  setActive(id: string, userId: string): Session | undefined {
+    const s = this.get(id, userId)
     if (!s) return undefined
-    this.activeId = id
+    this.activeIds.set(userId, id)
     this.scheduleSave()
     return s
   }
 
-  list(): SessionSummary[] {
+  list(userId: string): SessionSummary[] {
     return [...this.sessions.values()]
+      .filter((session) => session.userId === userId)
       .sort((a, b) => b.updatedAt - a.updatedAt)
       .map((s) => {
         const lastUser = [...s.uiMessages]
@@ -206,13 +225,19 @@ export class SessionStore {
       })
   }
 
-  delete(id: string): boolean {
+  delete(id: string, userId: string): boolean {
+    if (!this.get(id, userId)) return false
     const ok = this.sessions.delete(id)
-    if (this.activeId === id) {
-      this.activeId = this.sessions.size
-        ? [...this.sessions.values()].sort((a, b) => b.updatedAt - a.updatedAt)[0]
+    if (this.activeIds.get(userId) === id) {
+      const remaining = [...this.sessions.values()].filter(
+        (session) => session.userId === userId,
+      )
+      const nextId = remaining.length
+        ? remaining.sort((a, b) => b.updatedAt - a.updatedAt)[0]
             ?.id ?? null
         : null
+      if (nextId) this.activeIds.set(userId, nextId)
+      else this.activeIds.delete(userId)
     }
     if (ok) this.scheduleSave()
     return ok
