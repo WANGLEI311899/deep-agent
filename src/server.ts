@@ -33,6 +33,9 @@ import {
   rejectRateLimited,
   rejectUnauthorized,
 } from './auth.js'
+import { AppError, ErrorCodes, errorResponse, normalizeError } from './errors.js'
+import { logger, requestLogger } from './logger.js'
+import { captureException, flushTelemetry, initTelemetry } from './telemetry.js'
 
 const PORT = deployConfig.port
 const HOST = deployConfig.host
@@ -124,6 +127,19 @@ function sendJson(
   res.end(body)
 }
 
+/** 所有失败响应使用同一结构，前端可按 code 和 retryable 做稳定处理。 */
+function sendError(
+  res: http.ServerResponse,
+  requestId: string,
+  error: AppError,
+): void {
+  sendJson(res, error.statusCode, errorResponse(error, requestId))
+}
+
+function sendStandardError(res: http.ServerResponse, error: AppError): void {
+  sendError(res, String(res.getHeader('X-Request-Id') || 'unknown'), error)
+}
+
 function contentType(filePath: string): string {
   const ext = path.extname(filePath).toLowerCase()
   const map: Record<string, string> = {
@@ -146,12 +162,12 @@ function serveStatic(req: http.IncomingMessage, res: http.ServerResponse): void 
   const resolved = path.normalize(path.join(PUBLIC_DIR, safePath))
 
   if (!resolved.startsWith(PUBLIC_DIR)) {
-    sendJson(res, 403, { error: 'Forbidden' })
+    sendStandardError(res, new AppError(ErrorCodes.InvalidRequest, 'Forbidden', 403, 'static_files'))
     return
   }
 
   if (!fs.existsSync(resolved) || fs.statSync(resolved).isDirectory()) {
-    sendJson(res, 404, { error: 'Not Found' })
+    sendStandardError(res, new AppError(ErrorCodes.NotFound, 'Not Found', 404, 'static_files'))
     return
   }
 
@@ -243,18 +259,21 @@ async function handleChat(
   req: http.IncomingMessage,
   res: http.ServerResponse,
   userId: string,
+  requestId: string,
 ): Promise<void> {
+  const log = requestLogger(requestId, { userId, route: '/api/chat' })
+  const startedAt = Date.now()
   let body: { message?: string; sessionId?: string } = {}
   try {
     body = JSON.parse((await readBody(req)) || '{}')
   } catch {
-    sendJson(res, 400, { error: '请求体必须是 JSON。' })
+    sendError(res, requestId, new AppError(ErrorCodes.InvalidRequest, '请求体必须是 JSON。', 400, 'request_parse'))
     return
   }
 
   const message = (body.message ?? '').trim()
   if (!message) {
-    sendJson(res, 400, { error: 'message 不能为空。' })
+    sendError(res, requestId, new AppError(ErrorCodes.InvalidRequest, 'message 不能为空。', 400, 'request_validation'))
     return
   }
 
@@ -267,7 +286,8 @@ async function handleChat(
 
   // 单 Agent 实例：全局同时只允许一轮对话（含跨会话）
   if (busySessions.size > 0) {
-    sendJson(res, 429, { error: 'Agent 正在处理消息，请稍候。' })
+    log.warn({ event: 'agent.busy', activeRequests: busySessions.size }, 'Agent 正忙')
+    sendError(res, requestId, new AppError(ErrorCodes.AgentBusy, 'Agent 正在处理消息，请稍候。', 429, 'agent_queue', true))
     return
   }
 
@@ -276,10 +296,12 @@ async function handleChat(
     'Cache-Control': 'no-cache, no-transform',
     Connection: 'keep-alive',
     'X-Accel-Buffering': 'no',
+    'X-Request-Id': requestId,
   })
   res.write(': connected\n\n')
 
   busySessions.add(session.id)
+  log.info({ event: 'chat.started', sessionId: session.id, promptChars: message.length }, '对话开始')
   let closed = false
   const requestController = new AbortController()
   const requestTimeoutMs = Number(
@@ -289,11 +311,13 @@ async function handleChat(
     requestController.abort(
       new Error(`Agent 请求超过 ${requestTimeoutMs}ms，已自动取消。`),
     )
+    log.warn({ event: 'chat.timeout', sessionId: session.id, timeoutMs: requestTimeoutMs }, '对话超时')
   }, requestTimeoutMs)
   // SSE 响应断开才代表浏览器离开；不能使用请求体的 close 事件判断。
   res.on('close', () => {
     if (!res.writableEnded) {
       closed = true
+      log.info({ event: 'client.disconnected', sessionId: session.id }, '客户端断开连接')
       requestController.abort(new Error('客户端已断开连接。'))
     }
   })
@@ -375,6 +399,14 @@ async function handleChat(
         emit('chunk', { text: delta, messageId: assistantId })
       },
       onTool: (tool: ToolCallEvent) => {
+        log.info({
+          event: `tool.${tool.status}`,
+          sessionId: session!.id,
+          toolCallId: tool.id,
+          toolName: tool.name,
+          toolStatus: tool.status,
+          durationMs: tool.endedAt ? tool.endedAt - tool.startedAt : undefined,
+        }, '工具状态变化')
         store.upsertTool(session!, assistantId, tool)
         emit('tool', { messageId: assistantId, tool })
       },
@@ -396,6 +428,7 @@ async function handleChat(
     store.flush()
 
     emit('done', {
+      requestId,
       sessionId: session.id,
       messageId: assistantId,
       content: full,
@@ -404,12 +437,44 @@ async function handleChat(
       cancelled: !!result.cancelled,
       title: session.title,
     })
+    log.info({
+      event: 'chat.succeeded',
+      sessionId: session.id,
+      durationMs: Date.now() - startedAt,
+      outputChars: full.length,
+      filesWritten: result.filesWritten.length,
+    }, '对话完成')
     res.end()
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error)
     const cancelled = requestController.signal.aborted
-    console.error(cancelled ? '[Server] chat cancelled:' : '[Server] chat error:', error)
-    emit(cancelled ? 'cancelled' : 'error', { error: msg })
+    const reason = requestController.signal.reason
+    const timedOut = reason instanceof Error && reason.message.includes('超过')
+    const normalized = cancelled
+      ? new AppError(
+          timedOut ? ErrorCodes.LlmTimeout : ErrorCodes.ClientDisconnected,
+          timedOut ? 'Agent 请求超时，请稍后重试。' : '客户端已断开连接。',
+          timedOut ? 504 : 499,
+          timedOut ? 'agent_request' : 'sse_stream',
+          true,
+          { cause: error },
+        )
+      : normalizeError(error, 'llm_generate')
+    log.error({
+      event: cancelled ? 'chat.cancelled' : 'chat.failed',
+      err: error,
+      code: normalized.code,
+      stage: normalized.stage,
+      sessionId: session.id,
+      durationMs: Date.now() - startedAt,
+    }, normalized.message)
+    captureException(error, {
+      requestId,
+      sessionId: session.id,
+      userId,
+      code: normalized.code,
+      stage: normalized.stage,
+    })
+    emit(cancelled ? 'cancelled' : 'error', errorResponse(normalized, requestId))
     if (!res.writableEnded) res.end()
   } finally {
     clearTimeout(requestTimer)
@@ -434,19 +499,19 @@ async function handleHitl(
   try {
     body = JSON.parse((await readBody(req)) || '{}')
   } catch {
-    sendJson(res, 400, { error: '无效 JSON' })
+    sendStandardError(res, new AppError(ErrorCodes.InvalidRequest, '无效 JSON', 400, 'hitl_parse'))
     return
   }
 
   const id = body.id
   if (!id || typeof body.approved !== 'boolean') {
-    sendJson(res, 400, { error: '需要 id 与 approved 字段' })
+    sendStandardError(res, new AppError(ErrorCodes.InvalidRequest, '需要 id 与 approved 字段', 400, 'hitl_validation'))
     return
   }
 
   const pending = pendingHitl.get(id)
   if (!pending || pending.userId !== userId) {
-    sendJson(res, 404, { error: '确认请求不存在或已过期' })
+    sendStandardError(res, new AppError(ErrorCodes.NotFound, '确认请求不存在或已过期', 404, 'hitl_lookup'))
     return
   }
 
@@ -506,11 +571,7 @@ async function handleFiles(
 
 function rejectPublicWorkspaceMutation(res: http.ServerResponse): boolean {
   if (!deployConfig.publicMode) return false
-  sendJson(res, 403, {
-    error:
-      '公网模式下已锁定输出目录（仅允许服务器默认 output），禁止配置任意本机路径。',
-    code: 'WORKSPACES_LOCKED',
-  })
+  sendStandardError(res, new AppError(ErrorCodes.WorkspaceLocked, '公网模式下已锁定输出目录（仅允许服务器默认 output），禁止配置任意本机路径。', 403, 'workspace_mutation'))
   return true
 }
 
@@ -535,9 +596,7 @@ async function handleWorkspaces(
       path?: string
     }
     if (!body.path?.trim()) {
-      sendJson(res, 400, {
-        error: 'path 不能为空，请填写本机任意绝对路径，例如 D:\\\\docs\\\\my-folder',
-      })
+      sendStandardError(res, new AppError(ErrorCodes.InvalidRequest, 'path 不能为空，请填写本机任意绝对路径，例如 D:\\\\docs\\\\my-folder', 400, 'workspace_validation'))
       return true
     }
     const folder = workspaces.add(body.name || '', body.path)
@@ -593,11 +652,29 @@ function matchRoute(
 }
 
 const server = http.createServer(async (req, res) => {
+  const suppliedRequestId = req.headers['x-request-id']
+  const requestId =
+    typeof suppliedRequestId === 'string' && /^[A-Za-z0-9._-]{8,128}$/.test(suppliedRequestId)
+      ? suppliedRequestId
+      : randomUUID()
+  const requestStartedAt = Date.now()
+  const log = requestLogger(requestId)
+  res.setHeader('X-Request-Id', requestId)
+  res.once('finish', () => {
+    log.info({
+      event: 'http.request.completed',
+      method: req.method,
+      path: (req.url ?? '/').split('?')[0],
+      statusCode: res.statusCode,
+      durationMs: Date.now() - requestStartedAt,
+    }, 'HTTP 请求完成')
+  })
+  log.info({ event: 'http.request.started', method: req.method, path: (req.url ?? '/').split('?')[0] }, 'HTTP 请求开始')
   res.setHeader('Access-Control-Allow-Origin', '*')
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS')
   res.setHeader(
     'Access-Control-Allow-Headers',
-    'Content-Type, Authorization, X-Access-Token',
+    'Content-Type, Authorization, X-Access-Token, X-Request-Id',
   )
 
   if (req.method === 'OPTIONS') {
@@ -649,10 +726,7 @@ const server = http.createServer(async (req, res) => {
       userId !== 'owner' &&
       userId !== 'local'
     ) {
-      sendJson(res, 403, {
-        error: '多用户账号使用独立固定输出目录，不能修改全局工作区。',
-        code: 'USER_WORKSPACE_LOCKED',
-      })
+      sendStandardError(res, new AppError(ErrorCodes.WorkspaceLocked, '多用户账号使用独立固定输出目录，不能修改全局工作区。', 403, 'workspace_authorization'))
       return
     }
     if (await handleWorkspaces(method, url, req, res)) {
@@ -675,7 +749,7 @@ const server = http.createServer(async (req, res) => {
     if (method === 'GET' && getOne) {
       const session = store.get(decodeURIComponent(getOne[1]), userId)
       if (!session) {
-        sendJson(res, 404, { error: '会话不存在' })
+        sendStandardError(res, new AppError(ErrorCodes.SessionNotFound, '会话不存在', 404, 'session_lookup'))
         return
       }
       store.setActive(session.id, userId)
@@ -686,7 +760,7 @@ const server = http.createServer(async (req, res) => {
       const id = decodeURIComponent(getOne[1])
       const ok = store.delete(id, userId)
       if (!ok) {
-        sendJson(res, 404, { error: '会话不存在' })
+        sendStandardError(res, new AppError(ErrorCodes.SessionNotFound, '会话不存在', 404, 'session_delete'))
         return
       }
       // 若删光了，自动建一个空会话
@@ -703,7 +777,7 @@ const server = http.createServer(async (req, res) => {
     if (method === 'POST' && clearOne) {
       const session = store.get(decodeURIComponent(clearOne[1]), userId)
       if (!session) {
-        sendJson(res, 404, { error: '会话不存在' })
+        sendStandardError(res, new AppError(ErrorCodes.SessionNotFound, '会话不存在', 404, 'session_clear'))
         return
       }
       store.clearSession(session)
@@ -717,7 +791,7 @@ const server = http.createServer(async (req, res) => {
 
     if (method === 'POST' && url === '/api/chat') {
       if (rejectRateLimited(req, res)) return
-      await handleChat(req, res, userId)
+      await handleChat(req, res, userId, requestId)
       return
     }
     if (method === 'POST' && url === '/api/hitl') {
@@ -739,18 +813,19 @@ const server = http.createServer(async (req, res) => {
       return
     }
 
-    sendJson(res, 404, { error: 'Not Found' })
+    sendStandardError(res, new AppError(ErrorCodes.NotFound, 'Not Found', 404, 'routing'))
   } catch (error) {
-    console.error('[Server] request error:', error)
+    const normalized = normalizeError(error, 'http_handler')
+    log.error({ event: 'http.request.failed', err: error, code: normalized.code, stage: normalized.stage }, normalized.message)
+    captureException(error, { requestId, code: normalized.code, stage: normalized.stage })
     if (!res.headersSent) {
-      sendJson(res, 500, {
-        error: error instanceof Error ? error.message : String(error),
-      })
+      sendError(res, requestId, normalized)
     }
   }
 })
 
 async function main() {
+  initTelemetry()
   assertDeployConfig()
 
   if (!fs.existsSync(PUBLIC_DIR)) {
@@ -772,11 +847,11 @@ async function main() {
   process.on('exit', flushSessions)
   process.on('SIGINT', () => {
     flushSessions()
-    process.exit(0)
+    void flushTelemetry().finally(() => process.exit(0))
   })
   process.on('SIGTERM', () => {
     flushSessions()
-    process.exit(0)
+    void flushTelemetry().finally(() => process.exit(0))
   })
 
   const active = workspaces.getActive()
@@ -796,6 +871,7 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error(err)
-  process.exit(1)
+  logger.fatal({ event: 'server.startup.failed', err }, '服务启动失败')
+  captureException(err, { stage: 'startup', code: ErrorCodes.InternalError })
+  void flushTelemetry().finally(() => process.exit(1))
 })

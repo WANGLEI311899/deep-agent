@@ -1116,11 +1116,19 @@ async function sendMessage(raw) {
           await loadSessions()
           setStatus('done')
         } else if (event === 'error') {
-          throw new Error(payload.error || '未知错误')
+          // requestId 可直接关联服务端 Pino 日志和 Sentry 事件，方便用户反馈问题。
+          const reference = payload.requestId ? `\n问题编号：${payload.requestId}` : ''
+          const error = new Error(`${payload.error || '未知错误'}${reference}`)
+          error.code = payload.code
+          error.retryable = payload.retryable
+          throw error
         } else if (event === 'cancelled') {
           // 保留已收到的部分输出，方便用户判断是否需要重试。
           streamView.flush()
           if (assistant.stateEl) assistant.stateEl.textContent = '已取消'
+          if (payload.error && payload.requestId) {
+            appendError(`${payload.error}\n问题编号：${payload.requestId}`)
+          }
           setStatus('ready')
         }
       }

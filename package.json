@@ -15,8 +15,10 @@
     "demo:multi": "npm run build && node dist/demo-multi-agent.mjs"
   },
   "dependencies": {
+    "@sentry/node": "^10.69.0",
     "dotenv": "^16.4.0",
-    "openai": "^6.34.0"
+    "openai": "^6.34.0",
+    "pino": "^10.3.1"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

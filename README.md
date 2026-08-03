@@ -155,6 +155,34 @@ web/public/           # 前端静态页面
 | `AGENT_REQUEST_TIMEOUT_MS` | `120000` | 单轮 Agent 请求总超时；断连时也会取消 |
 | `AGENT_TOOL_TIMEOUT_MS` | `15000` | 单个工具默认超时 |
 | `AGENT_MAX_TOOLS_PER_TURN` | `3` | 单轮最多自动匹配工具数 |
+| `LOG_LEVEL` | `info` | Pino 结构化日志等级 |
+| `APP_VERSION` | `package version` | 日志中的部署版本号 |
+| `SENTRY_DSN` | 空 | Sentry DSN；留空时完全禁用 |
+| `SENTRY_ENVIRONMENT` | `NODE_ENV` | Sentry 环境名称 |
+| `SENTRY_RELEASE` | 空 | Sentry 发布版本 |
+| `SENTRY_TRACES_SAMPLE_RATE` | `0` | Sentry 性能追踪采样率（0-1） |
+
+## 故障定位与可观测性
+
+服务端使用 Pino 输出单行 JSON 结构化日志。每个 HTTP 请求都会生成 `requestId`，并通过
+`X-Request-Id` 响应头返回；聊天 SSE 的 `done`、`error` 和 `cancelled` 事件也包含该编号。
+向开发人员反馈问题时请同时提供 `requestId`，即可关联请求、会话、工具调用和耗时日志。
+
+错误响应采用稳定结构：
+
+```json
+{
+  "error": "模型响应超时，请稍后重试。",
+  "code": "LLM_TIMEOUT",
+  "stage": "agent_request",
+  "retryable": true,
+  "requestId": "请求编号"
+}
+```
+
+配置 `SENTRY_DSN` 后会启用 Sentry 异常采集；未配置时不会产生外部数据传输。默认不会上传
+用户问题、模型回答、Cookie、请求头或文件内容。生产环境建议同时设置 `APP_VERSION`、
+`SENTRY_ENVIRONMENT` 和 `SENTRY_RELEASE`，以便按部署版本定位回归问题。
 
 ### 多用户模式
 

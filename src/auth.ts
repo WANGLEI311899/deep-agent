@@ -4,6 +4,7 @@
 import { timingSafeEqual } from 'crypto'
 import type { IncomingMessage, ServerResponse } from 'http'
 import { deployConfig, isAuthEnabled } from './deploy-config.js'
+import { AppError, ErrorCodes, errorResponse } from './errors.js'
 
 function sendJson(
   res: ServerResponse,
@@ -90,10 +91,15 @@ export function rejectUnauthorized(
   res: ServerResponse,
 ): boolean {
   if (isAuthorized(req)) return false
-  sendJson(res, 401, {
-    error: '需要访问口令。请在界面输入 ACCESS_TOKEN，或请求头携带 Authorization: Bearer <token>。',
-    code: 'UNAUTHORIZED',
-  })
+  const requestId = String(res.getHeader('X-Request-Id') || 'unknown')
+  const supplied = Boolean(extractAccessToken(req))
+  const error = new AppError(
+    supplied ? ErrorCodes.AuthInvalid : ErrorCodes.AuthRequired,
+    supplied ? '访问口令无效。' : '需要访问口令。请在界面输入 ACCESS_TOKEN。',
+    401,
+    'authentication',
+  )
+  sendJson(res, 401, errorResponse(error, requestId))
   return true
 }
 
@@ -126,10 +132,9 @@ export function rejectRateLimited(
   const prev = chatHits.get(ip) ?? []
   const recent = prev.filter((t) => now - t < windowMs)
   if (recent.length >= limit) {
-    sendJson(res, 429, {
-      error: `请求过于频繁，每分钟最多 ${limit} 次对话，请稍后再试。`,
-      code: 'RATE_LIMITED',
-    })
+    const requestId = String(res.getHeader('X-Request-Id') || 'unknown')
+    const error = new AppError(ErrorCodes.RateLimited, `请求过于频繁，每分钟最多 ${limit} 次对话，请稍后再试。`, 429, 'rate_limit', true)
+    sendJson(res, 429, errorResponse(error, requestId))
     chatHits.set(ip, recent)
     return true
   }
