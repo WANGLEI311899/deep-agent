@@ -23,7 +23,7 @@ export interface SandboxContent {
   /** 绝对输出路径 */
   outputPath: string
   writeFile: (filename: string, content: string) => string
-  /** 兼容早期版本中的拼写，后续代码应优先使用 writeFile。 */
+  /** @deprecated 拼写错误别名，请使用 writeFile。将在 v2.0 中移除。 */
   wirteFile: (filename: string, content: string) => string
   readFile: (filename: string) => string | null
   listFiles: () => string[]
@@ -70,15 +70,41 @@ export function createSandBox(config: SandboxConfig): SandboxContent {
     console.log(`[Sandbox]   输出目录：${outputPath}`)
   }
 
-  function isPathSafe(targetPath: string): boolean {
-    // 禁止用户传入盘符绝对路径绕过沙箱（输出根目录本身由配置决定）
-    if (path.isAbsolute(targetPath)) {
-      const resolved = path.resolve(targetPath)
-      const relative = path.relative(outputPath, resolved)
-      return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))
+  /** 逐级向上解析符号链接，拿到真实磁盘路径。 */
+  function resolveRealPath(targetPath: string): string {
+    try {
+      return fs.realpathSync(targetPath)
+    } catch {
+      // 路径尚不存在（常见于 writeFile 之前）：逐级向上查找存在的父目录
+      let current = targetPath
+      while (current !== path.dirname(current)) {
+        try {
+          const realParent = fs.realpathSync(path.dirname(current))
+          return path.join(realParent, path.basename(current))
+        } catch {
+          current = path.dirname(current)
+        }
+      }
+      return targetPath
     }
-    const resolved = path.resolve(outputPath, targetPath)
-    const relative = path.relative(outputPath, resolved)
+  }
+
+  function isPathSafe(targetPath: string): boolean {
+    // Step 1: 计算出期望的绝对路径
+    const resolved = path.isAbsolute(targetPath)
+      ? path.resolve(targetPath)
+      : path.resolve(outputPath, targetPath)
+
+    // Step 2: 解析符号链接到真实磁盘路径
+    const realTarget = resolveRealPath(resolved)
+
+    // Step 3: 输出目录本身也可能是符号链接，同样解析真实路径
+    const realOutput = (() => {
+      try { return fs.realpathSync(outputPath) } catch { return outputPath }
+    })()
+
+    // Step 4: 校验真实路径是否在输出目录内
+    const relative = path.relative(realOutput, realTarget)
     return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))
   }
 

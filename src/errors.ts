@@ -21,6 +21,10 @@ export const ErrorCodes = {
   SessionPersistFailed: 'SESSION_PERSIST_FAILED',
   ClientDisconnected: 'CLIENT_DISCONNECTED',
   WorkspaceLocked: 'WORKSPACE_LOCKED',
+  OcrInvalidImage: 'OCR_INVALID_IMAGE',
+  OcrTooManyImages: 'OCR_TOO_MANY_IMAGES',
+  OcrImageTooLarge: 'OCR_IMAGE_TOO_LARGE',
+  OcrFailed: 'OCR_FAILED',
   NotFound: 'NOT_FOUND',
   InternalError: 'INTERNAL_ERROR',
 } as const

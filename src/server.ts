@@ -13,12 +13,13 @@ import http from 'http'
 import fs from 'fs'
 import path from 'path'
 import { randomUUID } from 'crypto'
-import { createAgent, type deepCodex } from './agent.js'
+import { createAgent, type deepCodex, type Skill, SkillRegistry } from './agent.js'
 import {
   SessionStore,
   type Session,
   type ToolCallEvent,
   type UiMessage,
+  type MessageAttachment,
 } from './sessions.js'
 import { WorkspaceStore } from './workspace-store.js'
 import type { HitlRequestMeta } from './hitl.js'
@@ -36,6 +37,12 @@ import {
 import { AppError, ErrorCodes, errorResponse, normalizeError } from './errors.js'
 import { logger, requestLogger } from './logger.js'
 import { captureException, flushTelemetry, initTelemetry } from './telemetry.js'
+import {
+  OCR_UPLOAD_RULES,
+  readOcrUpload,
+  recognizeImage,
+  terminateOcrWorker,
+} from './ocr/ocr-service.js'
 
 const PORT = deployConfig.port
 const HOST = deployConfig.host
@@ -43,9 +50,63 @@ const PUBLIC_DIR = path.resolve(process.cwd(), 'web/public')
 
 const store = new SessionStore()
 const workspaces = new WorkspaceStore()
-let agent: deepCodex | null = null
-/** sessionId -> busy */
-const busySessions = new Set<string>()
+
+// ── Agent Pool（替代全局单例）──────────────────────────────
+/** 服务启动时一次性加载的 Skill，所有 Agent 实例复用。 */
+const sharedSkills: Skill[] = []
+let sharedSkillRegistry: SkillRegistry | undefined
+
+const MAX_CONCURRENT_AGENTS = Math.max(
+  1,
+  Number(process.env.AGENT_MAX_CONCURRENT ?? 5),
+)
+
+/** sessionId → Agent 实例 */
+const agentPool = new Map<string, { agent: deepCodex; lastUsed: number }>()
+let currentConcurrency = 0
+const concurrencyQueue: Array<{
+  sessionId: string
+  resolve: () => void
+}> = []
+
+function acquireConcurrencySlot(sessionId: string): Promise<void> {
+  if (currentConcurrency < MAX_CONCURRENT_AGENTS) {
+    currentConcurrency++
+    return Promise.resolve()
+  }
+  return new Promise((resolve) => {
+    concurrencyQueue.push({ sessionId, resolve })
+  })
+}
+
+function releaseConcurrencySlot(): void {
+  currentConcurrency = Math.max(0, currentConcurrency - 1)
+  const next = concurrencyQueue.shift()
+  if (next) {
+    currentConcurrency++
+    next.resolve()
+  }
+}
+
+/** 按 userId 获取临时 Agent（用于 meta/files/clear 等非 chat 端点） */
+function peekAgentForUser(userId: string): deepCodex | undefined {
+  const activeId = store.getActiveId(userId)
+  if (activeId) {
+    return agentPool.get(activeId)?.agent
+  }
+  return undefined
+}
+
+/** 空闲 Agent 清理定时器：30 分钟无活动则回收 */
+const AGENT_IDLE_TTL_MS = 30 * 60 * 1000
+setInterval(() => {
+  const now = Date.now()
+  for (const [sessionId, entry] of agentPool) {
+    if (now - entry.lastUsed > AGENT_IDLE_TTL_MS) {
+      agentPool.delete(sessionId)
+    }
+  }
+}, 5 * 60 * 1000)
 
 interface PendingHitl {
   id: string
@@ -75,15 +136,26 @@ const SYSTEM_PROMPT = `
 - 每次先简单说明你打算怎么做，再给出结果
 `
 
-async function ensureAgent(): Promise<deepCodex> {
-  if (agent) return agent
-  const active = workspaces.getActive()
-  agent = await createAgent({
+/** 从 Agent Pool 获取或创建 Session 专属 Agent 实例。 */
+async function getOrCreateAgent(
+  sessionId: string,
+  outputPath: string,
+): Promise<deepCodex> {
+  const existing = agentPool.get(sessionId)
+  if (existing) {
+    existing.lastUsed = Date.now()
+    existing.agent.setOutputPath(outputPath, false)
+    return existing.agent
+  }
+
+  const agent = await createAgent({
     name: 'deepCodex',
     skillDir: '.deepcodex/skills',
+    skills: sharedSkills,
+    skillRegistry: sharedSkillRegistry,
     sandbox: {
       workspacePath: process.cwd(),
-      outputPath: active.path,
+      outputPath,
       verbose: true,
     },
     hitl: {
@@ -94,24 +166,17 @@ async function ensureAgent(): Promise<deepCodex> {
     systemPrompt: SYSTEM_PROMPT,
     maxHistoryMessages: Number(process.env.DEEPSEEK_MAX_HISTORY ?? 20),
   })
+
+  agentPool.set(sessionId, { agent, lastUsed: Date.now() })
   return agent
 }
 
-/** 将 Agent 沙箱切换到当前激活的本地目录 */
+/** 同步所有活跃 Agent 到当前工作区。 */
 async function applyActiveWorkspace(): Promise<void> {
-  const current = await ensureAgent()
   const active = workspaces.getActive()
-  current.setOutputPath(active.path, true)
-}
-
-function bindSessionHistory(session: Session): void {
-  if (!agent) return
-  agent.setHistory(session.agentHistory)
-}
-
-function persistAgentHistory(session: Session): void {
-  if (!agent) return
-  session.agentHistory = agent.getHistory()
+  for (const [, entry] of agentPool) {
+    entry.agent.setOutputPath(active.path, true)
+  }
 }
 
 function sendJson(
@@ -202,6 +267,27 @@ function sessionPublic(session: Session) {
   }
 }
 
+/** 接收单张图片并执行 OCR；原图识别完成后即由 GC 回收，不写入磁盘。 */
+async function handleOcr(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  requestId: string,
+): Promise<void> {
+  const startedAt = Date.now()
+  const upload = await readOcrUpload(req)
+  const recognized = await recognizeImage(upload)
+  sendJson(res, 200, { id: `ocr_${randomUUID()}`, ...recognized })
+  requestLogger(requestId, { route: '/api/ocr' }).info({
+    event: 'ocr.succeeded',
+    filename: upload.filename,
+    imageBytes: upload.buffer.length,
+    width: upload.width,
+    height: upload.height,
+    outputChars: recognized.text.length,
+    durationMs: Date.now() - startedAt,
+  }, '图片 OCR 完成')
+}
+
 function createHitlWaiter(
   userId: string,
   sessionId: string,
@@ -263,7 +349,11 @@ async function handleChat(
 ): Promise<void> {
   const log = requestLogger(requestId, { userId, route: '/api/chat' })
   const startedAt = Date.now()
-  let body: { message?: string; sessionId?: string } = {}
+  let body: {
+    message?: string
+    sessionId?: string
+    attachments?: MessageAttachment[]
+  } = {}
   try {
     body = JSON.parse((await readBody(req)) || '{}')
   } catch {
@@ -271,11 +361,38 @@ async function handleChat(
     return
   }
 
-  const message = (body.message ?? '').trim()
-  if (!message) {
-    sendError(res, requestId, new AppError(ErrorCodes.InvalidRequest, 'message 不能为空。', 400, 'request_validation'))
+  const typedMessage = (body.message ?? '').trim()
+  const attachments = Array.isArray(body.attachments) ? body.attachments : []
+  if (attachments.length > OCR_UPLOAD_RULES.maxFiles) {
+    sendError(res, requestId, new AppError(
+      ErrorCodes.OcrTooManyImages,
+      '一次只能上传 1 张图片。仅支持 JPG/JPEG、PNG、WebP 格式；每次只能上传 1 张图片；单张不超过 10 MB。',
+      400,
+      'request_validation',
+    ))
     return
   }
+  const attachment = attachments[0]
+  const validAttachment = attachment?.type === 'ocr' &&
+    typeof attachment.filename === 'string' && attachment.filename.length <= 255 &&
+    OCR_UPLOAD_RULES.mimeTypes.includes(attachment.mimeType as never) &&
+    typeof attachment.text === 'string' &&
+    attachment.text.trim().length > 0 &&
+    attachment.text.length <= OCR_UPLOAD_RULES.maxTextChars
+  if (attachment && !validAttachment) {
+    sendError(res, requestId, new AppError(ErrorCodes.OcrInvalidImage, '图片 OCR 数据无效，请重新上传并识别。', 400, 'request_validation'))
+    return
+  }
+  if (!typedMessage && !validAttachment) {
+    sendError(res, requestId, new AppError(ErrorCodes.InvalidRequest, '请输入消息或上传一张图片。', 400, 'request_validation'))
+    return
+  }
+
+  const displayMessage = typedMessage || '请理解并处理图片中的文字内容；如果意图不明确，请先向我确认。'
+  // OCR 内容用明确边界包裹，既保留现有 Skill/Tool 意图匹配，也提示模型它来自图片。
+  const agentMessage = validAttachment
+    ? `${displayMessage}\n\n以下内容来自用户确认后的图片 OCR 结果（文件：${attachment.filename}）：\n<<<OCR_TEXT\n${attachment.text.trim()}\nOCR_TEXT`
+    : displayMessage
 
   let session = body.sessionId ? store.get(body.sessionId, userId) : undefined
   if (!session) {
@@ -284,10 +401,30 @@ async function handleChat(
     store.setActive(session.id, userId)
   }
 
-  // 单 Agent 实例：全局同时只允许一轮对话（含跨会话）
-  if (busySessions.size > 0) {
-    log.warn({ event: 'agent.busy', activeRequests: busySessions.size }, 'Agent 正忙')
-    sendError(res, requestId, new AppError(ErrorCodes.AgentBusy, 'Agent 正在处理消息，请稍候。', 429, 'agent_queue', true))
+  // Agent Pool 并发控制：超过上限时排队等待，而非立即 429
+  // 注意：仅在排队超过 30 秒后仍无槽位时才返回 503
+  try {
+    await Promise.race([
+      acquireConcurrencySlot(session.id),
+      new Promise<void>((_, reject) =>
+        setTimeout(
+          () => reject(new Error('排队超时')),
+          30_000,
+        ),
+      ),
+    ])
+  } catch {
+    sendError(
+      res,
+      requestId,
+      new AppError(
+        ErrorCodes.AgentBusy,
+        `并发已满（${MAX_CONCURRENT_AGENTS}），排队超时，请稍后重试。`,
+        503,
+        'agent_queue',
+        true,
+      ),
+    )
     return
   }
 
@@ -300,8 +437,7 @@ async function handleChat(
   })
   res.write(': connected\n\n')
 
-  busySessions.add(session.id)
-  log.info({ event: 'chat.started', sessionId: session.id, promptChars: message.length }, '对话开始')
+  log.info({ event: 'chat.started', sessionId: session.id, promptChars: agentMessage.length, hasOcrAttachment: validAttachment, concurrency: currentConcurrency }, '对话开始')
   let closed = false
   const requestController = new AbortController()
   const requestTimeoutMs = Number(
@@ -327,15 +463,15 @@ async function handleChat(
   }
 
   try {
-    const current = await ensureAgent()
-    // 每轮对话前同步当前激活的本地输出目录
-    // 多用户口令使用独立输出目录；owner/local 继续兼容自定义工作区。
+    // 每轮对话前计算输出目录：多用户口令使用独立目录；owner/local 使用全局工作区。
     const userOutputPath =
       userId === 'owner' || userId === 'local'
         ? workspaces.getActivePath()
         : path.resolve(process.cwd(), 'output', 'users', userId)
-    current.setOutputPath(userOutputPath, false)
-    bindSessionHistory(session)
+
+    const current = await getOrCreateAgent(session.id, userOutputPath)
+    // 每个 Session 的 Agent 都持有独立对话历史，直接恢复即可。
+    current.setHistory(session.agentHistory)
 
     // 本轮对话的 HITL 绑定到当前 SSE
     current.setHitlConfig({
@@ -356,11 +492,12 @@ async function handleChat(
     const userMsg: UiMessage = {
       id: randomUUID(),
       role: 'user',
-      content: message,
+      content: displayMessage,
+      attachments: validAttachment ? [attachment] : undefined,
       createdAt: Date.now(),
     }
     store.addUiMessage(session, userMsg)
-    store.touch(session, message)
+    store.touch(session, typedMessage || `图片识别：${attachment?.filename ?? ''}`)
 
     const assistantId = randomUUID()
     const assistantMsg: UiMessage = {
@@ -383,7 +520,7 @@ async function handleChat(
     // 流式过程中节流写盘：避免每个 token 都触发 sessions.json 重写
     let lastPersistAt = 0
     const PERSIST_EVERY_MS = 500
-    const result = await current.invokeStream(message, {
+    const result = await current.invokeStream(agentMessage, {
       writeToStdout: false,
       signal: requestController.signal,
       userId,
@@ -424,7 +561,8 @@ async function handleChat(
       tools: result.tools,
       filesWritten: result.filesWritten,
     })
-    persistAgentHistory(session)
+    // 保存 Agent 对话历史回 Session，确保下次恢复连贯。
+    session.agentHistory = current.getHistory()
     store.flush()
 
     emit('done', {
@@ -478,7 +616,7 @@ async function handleChat(
     if (!res.writableEnded) res.end()
   } finally {
     clearTimeout(requestTimer)
-    busySessions.delete(session.id)
+    releaseConcurrencySlot()
     // 清理可能残留的 HITL（连接断开时拒绝）
     for (const [id, p] of pendingHitl) {
       if (p.sessionId === session.id && closed) {
@@ -523,25 +661,30 @@ async function handleMeta(
   res: http.ServerResponse,
   userId: string,
 ): Promise<void> {
-  const current = await ensureAgent()
-  const skills = current.getSkills().map((s) => ({
+  // 优先从现有 Agent 获取模型名；没有则从环境变量推断
+  const existing = peekAgentForUser(userId)
+  const model = existing?.getModel() ?? process.env.DEEPSEEK_MODEL ?? 'deepseek-v4-flash'
+  const skillsInfo = sharedSkills.map((s) => ({
     name: s.name,
     fileName: s.fileName,
     description: s.description,
   }))
   const activeWs = workspaces.getActive()
   const ownsGlobalWorkspace = userId === 'owner' || userId === 'local'
+  const userOutputPath =
+    ownsGlobalWorkspace
+      ? workspaces.getActivePath()
+      : path.resolve(process.cwd(), 'output', 'users', userId)
   sendJson(res, 200, {
     name: 'deepCodex',
-    model: current.getModel(),
-    skills,
+    model,
+    skills: skillsInfo,
     activeSessionId: store.getActiveId(userId),
     workspace: ownsGlobalWorkspace ? workspaces.snapshot() : null,
-    outputPath: current.getOutputPath(),
+    outputPath: existing?.getOutputPath() ?? userOutputPath,
     activeWorkspace: ownsGlobalWorkspace ? activeWs : null,
     authRequired: isAuthEnabled(),
     publicMode: deployConfig.publicMode,
-    /** 公网模式下禁止自定义任意本机路径 */
     workspacesLocked: deployConfig.publicMode || !ownsGlobalWorkspace,
   })
 }
@@ -550,22 +693,20 @@ async function handleFiles(
   res: http.ServerResponse,
   userId: string,
 ): Promise<void> {
-  const current = await ensureAgent()
-  if (userId !== 'owner' && userId !== 'local') {
-    current.setOutputPath(
-      path.resolve(process.cwd(), 'output', 'users', userId),
-      false,
-    )
-  }
-  const sandbox = current.getSandbox()
+  const existing = peekAgentForUser(userId)
+  const userOutputPath =
+    userId === 'owner' || userId === 'local'
+      ? workspaces.getActivePath()
+      : path.resolve(process.cwd(), 'output', 'users', userId)
+  const sandbox = existing?.getSandbox()
   const active = workspaces.getActive()
   sendJson(res, 200, {
     files: sandbox?.listFiles() ?? [],
-    outputPath: sandbox?.outputPath ?? active.path,
+    outputPath: sandbox?.outputPath ?? userOutputPath,
     workspace:
       userId === 'owner' || userId === 'local'
         ? active
-        : { id: `user-${userId}`, name: '个人输出目录', path: sandbox?.outputPath },
+        : { id: `user-${userId}`, name: '个人输出目录', path: userOutputPath },
   })
 }
 
@@ -782,8 +923,8 @@ const server = http.createServer(async (req, res) => {
       }
       store.clearSession(session)
       if (store.getActiveId(userId) === session.id) {
-        const current = await ensureAgent()
-        current.clearHistory()
+        const current = agentPool.get(session.id)?.agent
+        current?.clearHistory()
       }
       sendJson(res, 200, { ok: true, session: sessionPublic(session) })
       return
@@ -794,6 +935,11 @@ const server = http.createServer(async (req, res) => {
       await handleChat(req, res, userId, requestId)
       return
     }
+    if (method === 'POST' && url === '/api/ocr') {
+      if (rejectRateLimited(req, res)) return
+      await handleOcr(req, res, requestId)
+      return
+    }
     if (method === 'POST' && url === '/api/hitl') {
       await handleHitl(req, res, userId)
       return
@@ -802,8 +948,8 @@ const server = http.createServer(async (req, res) => {
     if (method === 'POST' && url === '/api/clear') {
       const session = store.ensureActive(userId)
       store.clearSession(session)
-      const current = await ensureAgent()
-      current.clearHistory()
+      const current = peekAgentForUser(userId)
+      current?.clearHistory()
       sendJson(res, 200, { ok: true, sessionId: session.id })
       return
     }
@@ -833,7 +979,12 @@ async function main() {
   }
 
   console.log('🚀 正在初始化 deepCodex...')
-  await ensureAgent()
+  // 预加载 Skill（只扫描一次，所有 Agent 实例共享）
+  const { loadSkills: preloadSkills, SkillRegistry: SR } = await import('./skill-loader.js')
+  const preloaded = preloadSkills('.deepcodex/skills')
+  sharedSkills.push(...preloaded)
+  sharedSkillRegistry = new SR(preloaded)
+  console.log(`[Server] 预加载 ${sharedSkills.length} 个 Skill，所有 Agent 实例将共享`)
   // 无持久化会话时再创建空会话
   store.ensureActive('owner')
 
@@ -847,11 +998,11 @@ async function main() {
   process.on('exit', flushSessions)
   process.on('SIGINT', () => {
     flushSessions()
-    void flushTelemetry().finally(() => process.exit(0))
+    void Promise.allSettled([terminateOcrWorker(), flushTelemetry()]).finally(() => process.exit(0))
   })
   process.on('SIGTERM', () => {
     flushSessions()
-    void flushTelemetry().finally(() => process.exit(0))
+    void Promise.allSettled([terminateOcrWorker(), flushTelemetry()]).finally(() => process.exit(0))
   })
 
   const active = workspaces.getActive()

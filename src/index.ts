@@ -8,13 +8,14 @@
 import 'dotenv/config'
 import readline from 'readline'
 import { creatAgent } from './agent.js'
+// TODO: v2.0 中替换为 import { createAgent } from './agent.js'
 import process from 'process'
 
 async function main() {
   // 创建并初始化 Agent
   const agent = await creatAgent({
-    name: 'OpenCodex',
-    skillDir: '.wl/skills',
+    name: 'DeepCodex',
+    skillDir: '.deepcodex/skills',
     sandbox: {
       workspacePath: process.cwd(),
       outputDir: 'output',
@@ -25,7 +26,7 @@ async function main() {
       autoApprove: false, // 不自动同意，遇到高风险操作手动确认
     },
     systemPrompt: `
-你是OpenCodex，一个专业的前端 + AI 全栈智能体，由 DeepSeek 驱动。
+你是DeepCodex，一个专业的前端 + AI 全栈智能体，由 DeepSeek 驱动。
 你擅长：
 - TypeScript / Vue3 / React 前端开发
 - LangChain / Deep Agent AI 应用开发
@@ -40,7 +41,7 @@ async function main() {
   })
 
   // 显示启动信息
-  console.log('\n🤖 OpenCodex 已就绪！')
+  console.log('\n🤖 DeepCodex 已就绪！')
   console.log('─'.repeat(50))
   console.log('💡 已加载技能：')
   agent.getSkills().forEach((s) => {
@@ -102,7 +103,7 @@ async function main() {
     }
 
     // 正常对话，流式输出
-    process.stdout.write('\n🤖 wl：\n')
+    process.stdout.write('\n🤖 DeepCodex：\n')
     await agent.invokeStream(trimmed)
   }
 }

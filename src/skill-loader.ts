@@ -185,13 +185,13 @@ export class SkillRegistry {
 来源文件：${skill.fileName}
 触发说明：${skill.description || '未填写'}
 
-#### 执行步骤
+#### ⚠️ 必须严格按以下步骤执行（MUST FOLLOW）
 ${skill.script || '未填写 Script，请按通用能力处理。'}
 
 ${skill.references ? `#### 参考资料\n${skill.references}` : ''}
 ${skill.examples ? `#### 示例\n${skill.examples}` : ''}`,
       )
       .join('\n\n')
-    return `## 本轮已路由的 Skill\n\n${content}`
+    return `## 本轮已路由的 Skill\n\n${content}\n\n**重要**：以上 Skill 的 Script 是你必须严格遵循的执行流程。请逐一完成每个步骤并说明执行结果，不要跳过或自行发挥。`
   }
 }

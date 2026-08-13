@@ -182,7 +182,26 @@
 
         <footer class="composer-wrap">
           <form class="composer" id="composer">
-            <div class="composer-box">
+            <div class="composer-box" id="composerBox">
+              <!-- OCR 一期仅接收单图；隐藏 input 由按钮触发，拖拽和粘贴复用同一校验流程。 -->
+              <input
+                id="imageInput"
+                class="visually-hidden"
+                type="file"
+                accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+              />
+              <section class="ocr-preview" id="ocrPreview" hidden aria-live="polite">
+                <div class="ocr-file-row">
+                  <img id="ocrThumbnail" class="ocr-thumbnail" alt="待识别图片预览" />
+                  <div class="ocr-file-info">
+                    <strong id="ocrFilename">—</strong>
+                    <span id="ocrStatus">准备识别</span>
+                  </div>
+                  <button id="btnRemoveImage" class="ocr-remove" type="button" aria-label="移除图片">×</button>
+                </div>
+                <label class="ocr-result-label" for="ocrText">OCR 识别结果（可修改）</label>
+                <textarea id="ocrText" class="ocr-text" rows="3" placeholder="识别出的文字会显示在这里…"></textarea>
+              </section>
               <textarea
                 id="input"
                 rows="1"
@@ -190,12 +209,20 @@
                 autocomplete="off"
               ></textarea>
               <div class="composer-bar">
-                <div class="composer-hint">
-                  <span class="kbd">Enter</span>
-                  <span class="hint-text">发送</span>
-                  <span class="sep"></span>
-                  <span class="kbd">⇧ Enter</span>
-                  <span class="hint-text">换行</span>
+                <div class="composer-left">
+                  <button class="upload-btn" id="btnUploadImage" type="button" title="上传图片进行 OCR" aria-label="上传图片进行 OCR">
+                    <svg width="17" height="17" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+                      <path d="M3.5 10.5v3A1.5 1.5 0 0 0 5 15h8a1.5 1.5 0 0 0 1.5-1.5v-3M9 12V3m0 0L5.75 6.25M9 3l3.25 3.25" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                    </svg>
+                    <span>图片</span>
+                  </button>
+                  <div class="composer-hint">
+                    <span class="kbd">Enter</span>
+                    <span class="hint-text">发送</span>
+                    <span class="sep"></span>
+                    <span class="kbd">⇧ Enter</span>
+                    <span class="hint-text">换行</span>
+                  </div>
                 </div>
                 <button class="send-btn" id="btnSend" type="submit" disabled title="发送">
                   <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -214,6 +241,29 @@
           <p class="disclaimer">写入文件与高风险操作会先征求你的确认。结果请自行核对。</p>
         </footer>
       </main>
+    </div>
+
+    <!-- 通用消息弹框：图片格式、数量、大小等上传错误统一在这里明确提示。 -->
+    <div class="modal-root" id="messageModal" hidden>
+      <div class="modal-backdrop" id="messageBackdrop"></div>
+      <div class="modal-panel message-panel" role="alertdialog" aria-modal="true" aria-labelledby="messageTitle" aria-describedby="messageText">
+        <div class="modal-head">
+          <div class="modal-badge high">提示</div>
+          <h2 id="messageTitle">图片上传失败</h2>
+        </div>
+        <p class="modal-desc message-text" id="messageText"></p>
+        <div class="upload-rules">
+          <strong>上传要求</strong>
+          <ul>
+            <li>格式：JPG/JPEG、PNG、WebP</li>
+            <li>数量：每次只能上传 1 张</li>
+            <li>大小：单张不超过 10 MB</li>
+          </ul>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-approve" id="btnMessageOk">我知道了</button>
+        </div>
+      </div>
     </div>
 
     <!-- HITL -->
@@ -267,6 +317,7 @@
       </div>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="/app.js"></script>
   </body>
 </html>

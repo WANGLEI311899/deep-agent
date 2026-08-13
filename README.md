@@ -96,6 +96,9 @@ docker run --rm -p 5173:5173 \
 | `npm run demo:basic` | Skill 基础演示 |
 | `npm run demo:search` | 搜索 + 写文件演示（需 Tavily） |
 | `npm run demo:multi` | 多阶段协作演示 |
+| `npm run rag:status` | 查看当前工作区知识库状态 |
+| `npm run rag:index` | 强制重建当前工作区知识库索引 |
+| `npm run rag:evaluate` | 运行 RAG 回归评测并生成 JSON/Markdown 报告 |
 | `npm run build` | 仅构建到 `dist/` |
 | `npm run typecheck` | TypeScript 类型检查 |
 
@@ -105,6 +108,65 @@ docker run --rm -p 5173:5173 \
 - 工具调用时间线（技能扫描 / LLM / 写文件 / HITL）
 - 写文件与高风险操作的 HITL 弹窗确认
 - 自定义本机输出目录（任意绝对路径，可增删改切换）
+- 单图上传、拖拽或粘贴截图，执行中英文 OCR 后结合文字指令识别意图
+- 可选 LlamaIndex 工作区知识库检索（自动更新索引并引用来源）
+
+## 图片 OCR
+
+输入框支持上传、拖拽或粘贴一张图片。OCR 完成后会显示可编辑的识别结果，确认无误再发送给
+Agent；只上传图片时，Agent 会尝试理解图片文字，意图不明确时先询问用户。
+
+- 支持 JPG/JPEG、PNG、WebP
+- 每次最多 1 张，单张不超过 10 MB、默认不超过 2,500 万像素
+- 原图只在内存中参与识别，不写入工作区；会话仅保存文件名和确认后的 OCR 文字
+- 使用本地 Tesseract.js，默认识别简体中文和英文；语言数据随依赖安装，首次初始化可能稍慢
+- 图片中的高风险文字仍会经过现有 HITL 确认
+
+## 工作区知识库（LlamaIndex RAG）
+
+RAG 模块只负责文档切分、向量索引和检索，原有 DeepSeek Agent、Skill、HITL 和会话机制保持不变。
+索引缓存在 `.deepcodex/rag/`，文档或分块配置变化后会自动重建。
+
+先在 `.env` 配置一个 OpenAI-compatible embedding 服务：
+
+```env
+RAG_ENABLED=true
+RAG_EMBEDDING_API_KEY=你的-embedding-key
+RAG_EMBEDDING_BASE_URL=https://api.openai.com/v1
+RAG_EMBEDDING_MODEL=text-embedding-3-small
+```
+
+DeepSeek 当前聊天 Key 不作为 embedding Key 使用。配置完成后可以：
+
+```bash
+# 检查配置并构建索引
+npm run rag:status
+npm run rag:index
+
+# 启动 UI 后使用明确的知识库指令
+# 示例：根据工作区资料，生产环境应该怎样部署？
+npm run ui
+```
+
+当前内置读取器面向文本和代码文件，包括 Markdown、TXT、JSON、CSV、HTML、JavaScript、
+TypeScript、Vue、Python、Java、Go、Rust、SQL、YAML、TOML 和 XML。超大文件、符号链接、
+`node_modules`、`.git`、`dist` 等目录默认跳过。
+默认最多索引 2,000 个文件、单文件 2 MB、总计 50 MB，避免误选大型目录后产生不可控的
+embedding 费用；可通过 `.env` 中的 `RAG_MAX_*` 参数调整。索引内容会发送给你配置的
+embedding 服务，包含敏感资料的工作区应先确认服务方的数据处理政策。
+
+### RAG 质量评测
+
+复制示例评测集后，按实际文档维护问题与预期来源：
+
+```bash
+copy .deepcodex\rag-eval.example.json .deepcodex\rag-eval.json
+npm run rag:evaluate
+```
+
+评测默认计算 Hit Rate、MRR、Precision@K 和 Recall@K，不产生额外生成费用。报告写入
+`.deepcodex/rag-evaluations/`。若配置 `RAG_EVAL_LLM_ENABLED=true`，还会使用 DeepSeek
+生成带来源回答，并评估关键词覆盖、回答相关性、忠实度和引用质量。
 
 ## 目录结构
 
@@ -118,6 +180,7 @@ src/
   hitl.ts             # 人工确认
   skill-loader.ts     # Skill 加载
   tools/              # 搜索等工具
+  rag/                # LlamaIndex 索引、embedding 与 RAG 评测
 web/public/           # 前端静态页面
 .deepcodex/
   skills/             # *.skill.md 技能文件
@@ -155,6 +218,18 @@ web/public/           # 前端静态页面
 | `AGENT_REQUEST_TIMEOUT_MS` | `120000` | 单轮 Agent 请求总超时；断连时也会取消 |
 | `AGENT_TOOL_TIMEOUT_MS` | `15000` | 单个工具默认超时 |
 | `AGENT_MAX_TOOLS_PER_TURN` | `3` | 单轮最多自动匹配工具数 |
+| `OCR_LANGUAGES` | `eng+chi_sim` | Tesseract OCR 语言组合 |
+| `OCR_LANG_PATH` | 空 | 可选的自建/离线 Tesseract 语言数据目录 |
+| `OCR_MAX_IMAGE_PIXELS` | `25000000` | 单图最大总像素数 |
+| `OCR_MAX_TEXT_CHARS` | `20000` | OCR 结果进入聊天上下文的最大字符数 |
+| `RAG_ENABLED` | `false` | 是否启用工作区 LlamaIndex RAG |
+| `RAG_EMBEDDING_API_KEY` | 空 | 独立的 embedding 服务密钥 |
+| `RAG_EMBEDDING_BASE_URL` | OpenAI | OpenAI-compatible embedding 地址 |
+| `RAG_EMBEDDING_MODEL` | `text-embedding-3-small` | embedding 模型名 |
+| `RAG_TOP_K` | `5` | 每次检索返回的最大片段数 |
+| `RAG_CHUNK_SIZE` | `700` | LlamaIndex 文档分块 token 数 |
+| `RAG_CHUNK_OVERLAP` | `100` | 相邻分块重叠 token 数 |
+| `RAG_EVAL_LLM_ENABLED` | `false` | 是否启用生成回答与 LLM 质量评分 |
 | `LOG_LEVEL` | `info` | Pino 结构化日志等级 |
 | `APP_VERSION` | `package version` | 日志中的部署版本号 |
 | `SENTRY_DSN` | 空 | Sentry DSN；留空时完全禁用 |

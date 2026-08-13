@@ -11,6 +11,12 @@
 # 本地工作区 / 会话（含用户路径与对话内容）
 .deepcodex/workspaces.json
 .deepcodex/sessions.json
+# RAG 向量缓存和评测报告可由源文档重建，不提交仓库。
+.deepcodex/rag/
+.deepcodex/rag-evaluations/
+.deepcodex/rag-eval.json
+# OCR 语言数据可从 npm 依赖恢复，运行时会自动生成本地缓存。
+.deepcodex/ocr-langs/
 
 # 依赖目录（体积大，从 package.json 恢复）
 node_modules/

@@ -1,0 +1,14 @@
+[
+  {
+    "id": "deployment-guide",
+    "query": "项目应该怎样启动生产服务？",
+    "expectedSources": ["README.md"],
+    "expectedAnswerKeywords": ["npm start"]
+  },
+  {
+    "id": "environment-config",
+    "query": "访问口令需要配置哪个环境变量？",
+    "expectedSources": ["README.md"],
+    "expectedAnswerKeywords": ["ACCESS_TOKEN"]
+  }
+]

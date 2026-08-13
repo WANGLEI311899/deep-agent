@@ -12,15 +12,24 @@
     "ui": "npm run build && node scripts/run-demo.mjs server.mjs",
     "demo:basic": "npm run build && node scripts/run-demo.mjs",
     "demo:search": "npm run build && node scripts/run-demo.mjs demo-search.mjs",
-    "demo:multi": "npm run build && node dist/demo-multi-agent.mjs"
+    "demo:multi": "npm run build && node dist/demo-multi-agent.mjs",
+    "rag:status": "npm run build && node dist/rag-cli.mjs status",
+    "rag:index": "npm run build && node dist/rag-cli.mjs index",
+    "rag:evaluate": "npm run build && node dist/rag-cli.mjs evaluate"
   },
   "dependencies": {
     "@sentry/node": "^10.69.0",
+    "@tesseract.js-data/chi_sim": "^1.0.0",
+    "@tesseract.js-data/eng": "^1.0.0",
+    "busboy": "^1.6.0",
     "dotenv": "^16.4.0",
+    "llamaindex": "^0.12.1",
     "openai": "^6.34.0",
-    "pino": "^10.3.1"
+    "pino": "^10.3.1",
+    "tesseract.js": "^7.0.0"
   },
   "devDependencies": {
+    "@types/busboy": "^1.5.4",
     "@types/node": "^22.0.0",
     "tsup": "^8.5.1",
     "typescript": "^5.6.0"

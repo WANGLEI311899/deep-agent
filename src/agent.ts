@@ -32,6 +32,15 @@ export interface AgentConfig {
   systemPrompt?: string
   maxToken?: number
   /**
+   * 预加载的 Skill 列表（服务端复用，跳过文件系统扫描）。
+   * 若提供则 init() 不会再次调用 loadSkills()。
+   */
+  skills?: Skill[]
+  /**
+   * 预构建的 Skill 注册表，与 skills 配套使用。
+   */
+  skillRegistry?: SkillRegistry
+  /**
    * 喂给模型的对话历史条数上限（user+assistant 合计）。
    * 默认 20（约 10 轮），超出后丢弃最早的消息。
    */
@@ -110,6 +119,11 @@ export class deepCodex {
         config.maxHistoryMessages ??
         Number(process.env.DEEPSEEK_MAX_HISTORY ?? 20),
     }
+    // 支持预加载 Skill（服务端复用），跳过 init() 中的文件系统扫描。
+    if (config.skills?.length) {
+      this.skills = config.skills
+      this.skillRegistry = config.skillRegistry ?? new SkillRegistry(config.skills)
+    }
     this.toolRegistry = new ToolRegistry({
       defaultTimeoutMs: Number(process.env.AGENT_TOOL_TIMEOUT_MS ?? 15_000),
       maxToolsPerTurn: Number(process.env.AGENT_MAX_TOOLS_PER_TURN ?? 3),
@@ -141,13 +155,51 @@ export class deepCodex {
     console.log(`🤖 ${this.config.name} 启动中...`)
     console.log(`${'='.repeat(50)}`)
 
-    console.log('\n📂 [Agent] 正在加载 Skill 文件...')
-    this.skills = loadSkills(this.config.skillDir)
-    this.skillRegistry = new SkillRegistry(this.skills)
+    if (this.skills.length > 0) {
+      console.log(`[Agent] 使用预加载 Skill（${this.skills.length} 个），跳过文件系统扫描`)
+    } else {
+      console.log('\n📂 [Agent] 正在加载 Skill 文件...')
+      this.skills = loadSkills(this.config.skillDir)
+      this.skillRegistry = new SkillRegistry(this.skills)
+    }
     console.log(`[Agent] 共加载 ${this.skills.length} 个 Skill`)
 
     console.log('\n🔒 [Agent] 正在初始化沙箱...')
     this.sandbox = createSandBox(this.config.sandbox)
+
+    // 条件注册 Tavily 搜索工具
+    if (process.env.TAVILY_API_KEY) {
+      try {
+        const { createTavilySearchTool } = await import('./tools/tavily-tool.js')
+        this.toolRegistry.register(createTavilySearchTool())
+        console.log('[Agent] Tavily 搜索工具已注册')
+      } catch (err) {
+        console.warn('[Agent] Tavily 工具注册失败（将跳过）:', err)
+      }
+    }
+
+    // RAG 配置完整时才注册，未配置 embedding 不影响原有 Agent 启动。
+    if (/^(1|true|yes|on)$/i.test(process.env.RAG_ENABLED ?? '')) {
+      try {
+        const { loadRagConfig } = await import('./rag/config.js')
+        const { createWorkspaceRagTool } = await import(
+          './tools/workspace-rag-tool.js'
+        )
+        const ragConfig = loadRagConfig()
+        if (ragConfig.enabled) {
+          this.toolRegistry.register(
+            createWorkspaceRagTool(
+              () => this.sandbox?.outputPath ?? this.config.sandbox.outputPath ?? '',
+            ),
+          )
+          console.log('[Agent] 工作区 RAG 检索工具已注册')
+        } else {
+          console.warn('[Agent] RAG_ENABLED 已开启，但缺少 RAG_EMBEDDING_API_KEY')
+        }
+      } catch (err) {
+        console.warn('[Agent] 工作区 RAG 工具注册失败（将跳过）:', err)
+      }
+    }
 
     console.log(`\n✅ [Agent] 初始化完成，模型：${this.config.model}`)
     console.log(`${'='.repeat(50)}\n`)
@@ -176,6 +228,8 @@ ${sandboxSection}
 
 ## 行为准则
 - 每次回复说明你正在做什么（Planning → 执行 → 输出）
+- **当系统提示中包含 Script 或"必须执行的步骤"时，你必须严格按照步骤顺序逐条执行，不得跳过或自由发挥**
+- 执行 Skill 步骤时在回复中明确标注当前步骤（如"正在执行第1步"）
 - 需要写文件时，使用以下格式：
 \`\`\`filename:文件名.md
 文件内容
@@ -224,22 +278,53 @@ ${this.config.systemPrompt}`
     })
   }
 
-  /** 滑动窗口：只保留最近 N 条消息，避免上下文无限膨胀 */
-  private trimHistory(): void {
+  /** 滑动窗口：超出阈值时用 LLM 压缩早期对话为摘要，保留最近消息。 */
+  private async compactHistory(): Promise<void> {
     const max = this.config.maxHistoryMessages
-    if (this.conversationHistory.length > max) {
-      const dropped = this.conversationHistory.length - max
-      this.conversationHistory = this.conversationHistory.slice(-max)
-      // 尽量保证从 user 消息开始，避免残缺 assistant 半截当开头
-      if (
-        this.conversationHistory.length > 0 &&
-        this.conversationHistory[0].role === 'assistant'
-      ) {
-        this.conversationHistory = this.conversationHistory.slice(1)
-      }
+    if (this.conversationHistory.length <= max) return
+
+    // 保留最近 max/2 条消息，将更早的消息压缩为摘要
+    const recentCount = Math.floor(max / 2)
+    const toSummarize = this.conversationHistory.slice(0, -recentCount)
+    const recent = this.conversationHistory.slice(-recentCount)
+
+    const conversationText = toSummarize
+      .map((m) => `${m.role === 'user' ? '用户' : '助手'}: ${m.content.slice(0, 2000)}`)
+      .join('\n\n')
+
+    try {
+      const summaryResponse = await this.client.chat.completions.create({
+        model: this.config.model,
+        max_tokens: 800,
+        temperature: 0.3,
+        messages: [
+          {
+            role: 'system',
+            content: '你是对话摘要助手。用中文将以下对话压缩为一段简洁摘要（不超过300字），保留关键事实、决策和用户目标。',
+          },
+          { role: 'user', content: `请总结以下对话：\n\n${conversationText}` },
+        ],
+      })
+
+      const summaryText = summaryResponse.choices[0]?.message?.content?.trim() ?? ''
+      const dropped = toSummarize.length
+
+      this.conversationHistory = [
+        { role: 'assistant', content: `[对话摘要] ${summaryText}` },
+        ...recent,
+      ]
+
       console.log(
-        `[Agent] 历史已截断：丢弃最早 ${dropped} 条，当前 ${this.conversationHistory.length} 条`,
+        `[Agent] 历史已压缩：丢弃 ${dropped} 条 → 生成 ${summaryText.length} 字摘要，保留最近 ${recent.length} 条`,
       )
+    } catch (error) {
+      // 摘要失败时回退到简单截断
+      console.warn('[Agent] 摘要生成失败，回退到简单截断:', error)
+      const trimmed = this.conversationHistory.slice(-max)
+      if (trimmed.length > 0 && trimmed[0].role === 'assistant') {
+        trimmed.shift()
+      }
+      this.conversationHistory = trimmed
     }
   }
 
@@ -412,7 +497,7 @@ ${this.config.systemPrompt}`
     }
 
     this.conversationHistory.push({ role: 'user', content: userMessage })
-    this.trimHistory()
+    await this.compactHistory()
     onStatus?.('thinking')
     console.log(
       `\n📨 [Agent] 收到任务：${userMessage.slice(0, 80)}${userMessage.length > 80 ? '...' : ''}`,
@@ -551,7 +636,7 @@ ${this.config.systemPrompt}`
 
     if (writeToStdout) console.log('\n' + '─'.repeat(50))
     this.conversationHistory.push({ role: 'assistant', content: fullContent })
-    this.trimHistory()
+    await this.compactHistory()
 
     onStatus?.('writing_files')
     const filesWritten = await this.processFileOperations(
@@ -609,7 +694,11 @@ ${this.config.systemPrompt}`
 
   setHistory(history: AgentMessage[]): void {
     this.conversationHistory = [...history]
-    this.trimHistory()
+    if (this.conversationHistory.length > this.config.maxHistoryMessages) {
+      console.warn(
+        `[Agent] setHistory: 历史消息 ${this.conversationHistory.length} 超出阈值 ${this.config.maxHistoryMessages}，将在下次调用时压缩`,
+      )
+    }
   }
 
   getSkills(): Skill[] {
@@ -628,8 +717,10 @@ export async function createAgent(config: AgentConfig): Promise<deepCodex> {
   return agent
 }
 
-/** @deprecated 使用 createAgent；保留别名避免旧脚本立刻挂掉 */
-export const creatAgent = createAgent
+/** @deprecated 请使用 createAgent；此别名将在 v2.0 中移除 */
+export const creatAgent: typeof createAgent = createAgent
 
 // re-export for convenience
 export type { HitlConfig, HitlRequestMeta }
+export type { Skill } from './skill-loader.js'
+export { SkillRegistry } from './skill-loader.js'

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * deepCodex Web UI
  * - 多会话历史
  * - SSE 流式 + 工具调用时间线
@@ -30,7 +30,16 @@ const els = {
   messages: $('#messages'),
   chatScroll: $('#chatScroll'),
   composer: $('#composer'),
+  composerBox: $('#composerBox'),
   input: $('#input'),
+  imageInput: $('#imageInput'),
+  btnUploadImage: $('#btnUploadImage'),
+  ocrPreview: $('#ocrPreview'),
+  ocrThumbnail: $('#ocrThumbnail'),
+  ocrFilename: $('#ocrFilename'),
+  ocrStatus: $('#ocrStatus'),
+  ocrText: $('#ocrText'),
+  btnRemoveImage: $('#btnRemoveImage'),
   btnSend: $('#btnSend'),
   btnClear: $('#btnClear'),
   btnNewChat: $('#btnNewChat'),
@@ -51,6 +60,19 @@ const els = {
   wsPathInput: $('#wsPathInput'),
   btnWsCancel: $('#btnWsCancel'),
   btnWsSave: $('#btnWsSave'),
+  messageModal: $('#messageModal'),
+  messageBackdrop: $('#messageBackdrop'),
+  messageTitle: $('#messageTitle'),
+  messageText: $('#messageText'),
+  btnMessageOk: $('#btnMessageOk'),
+}
+
+const IMAGE_UPLOAD_RULES = {
+  maxFiles: 1,
+  maxBytes: 10 * 1024 * 1024,
+  extensions: ['jpg', 'jpeg', 'png', 'webp'],
+  mimeTypes: ['image/jpeg', 'image/png', 'image/webp'],
+  hint: '仅支持 JPG/JPEG、PNG、WebP 格式；每次只能上传 1 张图片；单张不超过 10 MB。',
 }
 
 const state = {
@@ -69,6 +91,9 @@ const state = {
   authRequired: false,
   publicMode: false,
   workspacesLocked: false,
+  /** 当前待发送的 OCR 图片；原始 File 只保存在本次页面内存中。 */
+  ocrAttachment: null,
+  ocrBusy: false,
 }
 
 /* ── Auth / API ─────────────────────────────────────────── */
@@ -95,7 +120,7 @@ function authHeaders(extra = {}) {
 async function apiFetch(url, options = {}) {
   const opts = { ...options }
   const baseHeaders =
-    opts.body && !(opts.headers && opts.headers['Content-Type'])
+    opts.body && !(opts.body instanceof FormData) && !(opts.headers && opts.headers['Content-Type'])
       ? { 'Content-Type': 'application/json' }
       : {}
   opts.headers = authHeaders({ ...baseHeaders, ...(opts.headers || {}) })
@@ -243,6 +268,24 @@ function formatTime(ts) {
   })
 }
 
+function showMessageModal(message, title = '图片上传失败') {
+  els.messageTitle.textContent = title
+  els.messageText.textContent = message || IMAGE_UPLOAD_RULES.hint
+  els.messageModal.hidden = false
+  els.btnMessageOk.focus()
+}
+
+function hideMessageModal() {
+  els.messageModal.hidden = true
+  els.btnUploadImage?.focus()
+}
+
+function canSendMessage() {
+  const hasText = Boolean(els.input.value.trim())
+  const hasOcrText = Boolean(state.ocrAttachment && els.ocrText.value.trim())
+  return !state.busy && !state.ocrBusy && (hasText || hasOcrText)
+}
+
 function setStatus(key) {
   els.statusText.textContent = STATUS_MAP[key] ?? key
   const busy =
@@ -256,8 +299,11 @@ function setStatus(key) {
 
 function setBusy(busy) {
   state.busy = busy
-  els.btnSend.disabled = busy || !els.input.value.trim()
+  els.btnSend.disabled = !canSendMessage()
   els.input.disabled = busy
+  els.btnUploadImage.disabled = busy || state.ocrBusy
+  els.btnRemoveImage.disabled = busy
+  els.ocrText.disabled = busy || state.ocrBusy
 }
 
 function scrollToBottom(force = false) {
@@ -269,58 +315,14 @@ function scrollToBottom(force = false) {
 /* ── Markdown ───────────────────────────────────────────── */
 function renderMarkdown(src) {
   if (!src) return ''
-  const blocks = []
-  let text = src.replace(/```([^\n`]*)\n?([\s\S]*?)```/g, (_, lang, code) => {
-    const i = blocks.length
-    const language = (lang || '').trim()
-    blocks.push(
-      `<pre><code class="lang-${escapeHtml(language)}">${escapeHtml(code.replace(/\n$/, ''))}</code></pre>`,
-    )
-    return `\u0000BLOCK${i}\u0000`
-  })
-
-  text = escapeHtml(text)
-  text = text.replace(/^### (.+)$/gm, '<h3>$1</h3>')
-  text = text.replace(/^## (.+)$/gm, '<h2>$1</h2>')
-  text = text.replace(/^# (.+)$/gm, '<h1>$1</h1>')
-  text = text.replace(/^---$/gm, '<hr />')
-  text = text.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>')
-  text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-  text = text.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<em>$1</em>')
-  text = text.replace(/`([^`]+)`/g, '<code>$1</code>')
-
-  text = text.replace(/^(?:- |\* )(.+)(?:\n(?:- |\* ).+)*/gm, (block) => {
-    const items = block
-      .split('\n')
-      .map((line) => line.replace(/^(?:- |\* )/, ''))
-      .map((item) => `<li>${item}</li>`)
-      .join('')
-    return `<ul>${items}</ul>`
-  })
-
-  text = text.replace(/^\d+\. .+(?:\n\d+\. .+)*/gm, (block) => {
-    const items = block
-      .split('\n')
-      .map((line) => line.replace(/^\d+\. /, ''))
-      .map((item) => `<li>${item}</li>`)
-      .join('')
-    return `<ol>${items}</ol>`
-  })
-
-  text = text
-    .split(/\n{2,}/)
-    .map((para) => {
-      const trimmed = para.trim()
-      if (!trimmed) return ''
-      if (/^<\/?(h\d|ul|ol|li|pre|blockquote|hr|p)\b/i.test(trimmed)) return trimmed
-      if (trimmed.includes('\u0000BLOCK')) return trimmed.replace(/\n/g, '')
-      return `<p>${trimmed.replace(/\n/g, '<br />')}</p>`
-    })
-    .join('\n')
-
-  return text.replace(/\u0000BLOCK(\d+)\u0000/g, (_, i) => blocks[Number(i)])
+  try {
+    if (typeof marked !== 'undefined' && marked.parse) {
+      return marked.parse(src, { breaks: true })
+    }
+  } catch { /* CDN 未加载时静默降级 */ }
+  // 降级：纯文本 + 换行
+  return escapeHtml(src).replace(/\n/g, '<br />')
 }
-
 /**
  * 流式 Markdown 渲染节流：避免每个 token 都整段 re-parse 导致卡顿。
  * 默认约 80ms 刷新一次，结束时 flush 保证最终一致。
@@ -452,7 +454,7 @@ function clearMessagesDom() {
   state.live.clear()
 }
 
-function appendUserMessage(text) {
+function appendUserMessage(text, attachments = []) {
   showMessagesView(true)
   const row = document.createElement('div')
   row.className = 'msg user'
@@ -464,6 +466,13 @@ function appendUserMessage(text) {
     </div>
   `
   row.querySelector('.msg-content').textContent = text
+  const attachment = attachments[0]
+  if (attachment) {
+    const badge = document.createElement('div')
+    badge.className = 'user-attachment'
+    badge.textContent = `图片 OCR · ${attachment.filename}`
+    row.querySelector('.msg-body').appendChild(badge)
+  }
   els.messages.appendChild(row)
   scrollToBottom(true)
 }
@@ -531,7 +540,7 @@ function renderHistoryMessages(messages) {
   showMessagesView(true)
   for (const msg of messages) {
     if (msg.role === 'user') {
-      appendUserMessage(msg.content)
+      appendUserMessage(msg.content, msg.attachments || [])
     } else if (msg.role === 'assistant') {
       const handle = appendAssistantShell(msg.id, { streaming: false })
       if (msg.tools?.length) {
@@ -999,17 +1008,147 @@ els.workspaceList?.addEventListener('click', async (e) => {
   }
 })
 
+/* ── Image OCR ──────────────────────────────────────────── */
+function clearOcrAttachment() {
+  if (state.ocrAttachment?.previewUrl) URL.revokeObjectURL(state.ocrAttachment.previewUrl)
+  state.ocrAttachment = null
+  state.ocrBusy = false
+  els.imageInput.value = ''
+  els.ocrPreview.hidden = true
+  els.ocrThumbnail.removeAttribute('src')
+  els.ocrFilename.textContent = '—'
+  els.ocrStatus.textContent = '准备识别'
+  els.ocrStatus.classList.remove('ocr-error')
+  els.ocrText.value = ''
+  autoResize()
+}
+
+function validateSelectedImage(file) {
+  const extension = file.name.includes('.') ? file.name.split('.').pop().toLowerCase() : ''
+  if (!IMAGE_UPLOAD_RULES.extensions.includes(extension) || !IMAGE_UPLOAD_RULES.mimeTypes.includes(file.type)) {
+    return `“${file.name || '未命名文件'}”格式不正确。${IMAGE_UPLOAD_RULES.hint}`
+  }
+  if (file.size > IMAGE_UPLOAD_RULES.maxBytes) {
+    return `“${file.name}”超过 10 MB。${IMAGE_UPLOAD_RULES.hint}`
+  }
+  if (!file.size) return `“${file.name}”内容为空。${IMAGE_UPLOAD_RULES.hint}`
+  return ''
+}
+
+async function uploadImageForOcr(file) {
+  const validationError = validateSelectedImage(file)
+  if (validationError) {
+    showMessageModal(validationError)
+    return
+  }
+
+  clearOcrAttachment()
+  const pending = { file, previewUrl: URL.createObjectURL(file), result: null }
+  state.ocrAttachment = pending
+  state.ocrBusy = true
+  els.ocrPreview.hidden = false
+  els.ocrThumbnail.src = pending.previewUrl
+  els.ocrFilename.textContent = file.name
+  els.ocrStatus.textContent = '正在识别图片文字…'
+  els.ocrText.value = ''
+  setBusy(state.busy)
+
+  try {
+    const form = new FormData()
+    form.append('image', file, file.name)
+    const res = await apiFetch('/api/ocr', { method: 'POST', body: form })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(data.error || `OCR 请求失败（${res.status}）`)
+    // 用户可能在识别期间移除了图片，过期响应不能重新挂回输入框。
+    if (state.ocrAttachment !== pending) return
+    pending.result = data
+    els.ocrText.value = data.text || ''
+    if (data.text?.trim()) {
+      els.ocrStatus.textContent = `识别完成 · 置信度 ${Math.round(Number(data.confidence || 0))}%`
+    } else {
+      els.ocrStatus.textContent = '未识别到文字，请换一张更清晰的图片'
+      els.ocrStatus.classList.add('ocr-error')
+      showMessageModal('图片上传成功，但没有识别到文字。请换一张文字更清晰的图片，或直接输入文字说明。', '未识别到文字')
+    }
+  } catch (error) {
+    if (state.ocrAttachment !== pending) return
+    els.ocrStatus.textContent = '识别失败，请重试'
+    els.ocrStatus.classList.add('ocr-error')
+    showMessageModal(error.message || String(error))
+  } finally {
+    if (state.ocrAttachment === pending) {
+      state.ocrBusy = false
+      setBusy(state.busy)
+      autoResize()
+    }
+  }
+}
+
+function handleImageFiles(files) {
+  const selected = Array.from(files || [])
+  if (!selected.length) return
+  if (selected.length > IMAGE_UPLOAD_RULES.maxFiles) {
+    showMessageModal(`当前选择了 ${selected.length} 张图片，一次只能上传 1 张。${IMAGE_UPLOAD_RULES.hint}`)
+    return
+  }
+  void uploadImageForOcr(selected[0])
+}
+
+els.btnUploadImage?.addEventListener('click', () => els.imageInput.click())
+els.imageInput?.addEventListener('change', () => handleImageFiles(els.imageInput.files))
+els.btnRemoveImage?.addEventListener('click', clearOcrAttachment)
+els.ocrText?.addEventListener('input', autoResize)
+els.composerBox?.addEventListener('dragover', (event) => {
+  if (!event.dataTransfer?.types.includes('Files')) return
+  event.preventDefault()
+  els.composerBox.classList.add('dragging')
+})
+els.composerBox?.addEventListener('dragleave', () => els.composerBox.classList.remove('dragging'))
+els.composerBox?.addEventListener('drop', (event) => {
+  if (!event.dataTransfer?.files?.length) return
+  event.preventDefault()
+  els.composerBox.classList.remove('dragging')
+  handleImageFiles(event.dataTransfer.files)
+})
+document.addEventListener('paste', (event) => {
+  if (state.busy) return
+  const images = Array.from(event.clipboardData?.files || []).filter((file) => file.type.startsWith('image/'))
+  if (!images.length) return
+  event.preventDefault()
+  handleImageFiles(images)
+})
+
+els.btnMessageOk?.addEventListener('click', hideMessageModal)
+els.messageBackdrop?.addEventListener('click', hideMessageModal)
+document.addEventListener('keydown', (event) => {
+  if (els.messageModal?.hidden || event.key !== 'Escape') return
+  event.preventDefault()
+  hideMessageModal()
+})
+
 /* ── Chat SSE ───────────────────────────────────────────── */
 async function sendMessage(raw) {
   const message = (raw ?? els.input.value).trim()
-  if (!message || state.busy) return
+  const ocrText = els.ocrText.value.trim()
+  const attachment = state.ocrAttachment?.result && ocrText
+    ? {
+        type: 'ocr',
+        filename: state.ocrAttachment.result.filename,
+        mimeType: state.ocrAttachment.result.mimeType,
+        text: ocrText,
+        confidence: state.ocrAttachment.result.confidence,
+      }
+    : null
+  if ((!message && !attachment) || state.busy || state.ocrBusy) return
   if (!state.sessionId) await createSession()
 
   els.input.value = ''
+  clearOcrAttachment()
   autoResize()
   els.btnSend.disabled = true
 
-  appendUserMessage(message)
+  const displayMessage = message || '请理解并处理图片中的文字内容；如果意图不明确，请先向我确认。'
+  appendUserMessage(displayMessage, attachment ? [attachment] : [])
   // 临时 shell，等服务端 messageId
   let assistant = appendAssistantShell('pending', { streaming: true })
   const streamView = createStreamRenderer(assistant.contentEl, 80)
@@ -1021,7 +1160,11 @@ async function sendMessage(raw) {
   try {
     const res = await apiFetch('/api/chat', {
       method: 'POST',
-      body: JSON.stringify({ message, sessionId: state.sessionId }),
+      body: JSON.stringify({
+        message,
+        sessionId: state.sessionId,
+        attachments: attachment ? [attachment] : [],
+      }),
     })
 
     if (!res.ok) {
@@ -1161,7 +1304,7 @@ function autoResize() {
   const el = els.input
   el.style.height = 'auto'
   el.style.height = `${Math.min(el.scrollHeight, 180)}px`
-  els.btnSend.disabled = state.busy || !el.value.trim()
+  els.btnSend.disabled = !canSendMessage()
 }
 
 els.input.addEventListener('input', autoResize)
@@ -1170,7 +1313,7 @@ els.input.addEventListener('keydown', (e) => {
     // HITL 弹窗打开时交给全局 Enter
     if (!els.hitlModal.hidden) return
     e.preventDefault()
-    if (!state.busy && els.input.value.trim()) sendMessage()
+    if (canSendMessage()) sendMessage()
   }
 })
 els.composer.addEventListener('submit', (e) => {

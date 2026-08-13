@@ -33,7 +33,17 @@ export interface UiMessage {
   content: string
   tools?: ToolCallEvent[]
   filesWritten?: string[]
+  /** 图片原件不落盘；这里只保留 OCR 结果摘要供历史消息恢复展示。 */
+  attachments?: MessageAttachment[]
   createdAt: number
+}
+
+export interface MessageAttachment {
+  type: 'ocr'
+  filename: string
+  mimeType: string
+  text: string
+  confidence?: number
 }
 
 export interface SessionSummary {
