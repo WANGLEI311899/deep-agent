@@ -67,12 +67,12 @@ const els = {
   btnMessageOk: $('#btnMessageOk'),
 }
 
-const IMAGE_UPLOAD_RULES = {
+const MEDIA_UPLOAD_RULES = {
   maxFiles: 1,
-  maxBytes: 10 * 1024 * 1024,
-  extensions: ['jpg', 'jpeg', 'png', 'webp'],
-  mimeTypes: ['image/jpeg', 'image/png', 'image/webp'],
-  hint: '仅支持 JPG/JPEG、PNG、WebP 格式；每次只能上传 1 张图片；单张不超过 10 MB。',
+  maxBytes: 20 * 1024 * 1024,
+  extensions: ['jpg', 'jpeg', 'png', 'webp', 'pdf'],
+  mimeTypes: ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'],
+  hint: '支持 JPG/JPEG、PNG、WebP、PDF；每次只能上传 1 个文件；单个文件不超过 20 MB。',
 }
 
 const state = {
@@ -91,7 +91,7 @@ const state = {
   authRequired: false,
   publicMode: false,
   workspacesLocked: false,
-  /** 当前待发送的 OCR 图片；原始 File 只保存在本次页面内存中。 */
+  /** 当前待发送的多模态附件；原始 File 只保存在本次页面内存中。 */
   ocrAttachment: null,
   ocrBusy: false,
 }
@@ -268,9 +268,9 @@ function formatTime(ts) {
   })
 }
 
-function showMessageModal(message, title = '图片上传失败') {
+function showMessageModal(message, title = '附件上传失败') {
   els.messageTitle.textContent = title
-  els.messageText.textContent = message || IMAGE_UPLOAD_RULES.hint
+  els.messageText.textContent = message || MEDIA_UPLOAD_RULES.hint
   els.messageModal.hidden = false
   els.btnMessageOk.focus()
 }
@@ -470,7 +470,12 @@ function appendUserMessage(text, attachments = []) {
   if (attachment) {
     const badge = document.createElement('div')
     badge.className = 'user-attachment'
-    badge.textContent = `图片 OCR · ${attachment.filename}`
+    const label = attachment.type === 'pdf'
+      ? 'PDF 解析'
+      : attachment.mode === 'ocr' || attachment.type === 'ocr'
+        ? '图片 OCR'
+        : '图片理解'
+    badge.textContent = `${label} · ${attachment.filename}`
     row.querySelector('.msg-body').appendChild(badge)
   }
   els.messages.appendChild(row)
@@ -757,6 +762,15 @@ async function loadMeta() {
     if (!res.ok) throw new Error(`meta ${res.status}`)
     const data = await res.json()
     els.modelPill.textContent = data.model || 'deepseek-v4-flash'
+    if (data.multimodal) {
+      const available = [
+        data.multimodal.openai?.configured ? `OpenAI ${data.multimodal.openai.model}` : '',
+        data.multimodal.ollama?.enabled ? `Ollama ${data.multimodal.ollama.model}` : '',
+        '本地 OCR/PDF',
+      ].filter(Boolean)
+      // 不占用额外界面空间，通过上传按钮提示当前实际降级顺序。
+      els.btnUploadImage.title = `上传图片或 PDF（解析顺序：${available.join(' → ')}）`
+    }
     state.publicMode = Boolean(data.publicMode)
     state.workspacesLocked = Boolean(data.workspacesLocked || data.publicMode)
     applyWorkspaceLockUi()
@@ -1008,7 +1022,7 @@ els.workspaceList?.addEventListener('click', async (e) => {
   }
 })
 
-/* ── Image OCR ──────────────────────────────────────────── */
+/* ── Multimodal attachment ─────────────────────────────── */
 function clearOcrAttachment() {
   if (state.ocrAttachment?.previewUrl) URL.revokeObjectURL(state.ocrAttachment.previewUrl)
   state.ocrAttachment = null
@@ -1017,58 +1031,69 @@ function clearOcrAttachment() {
   els.ocrPreview.hidden = true
   els.ocrThumbnail.removeAttribute('src')
   els.ocrFilename.textContent = '—'
-  els.ocrStatus.textContent = '准备识别'
+  els.ocrStatus.textContent = '准备解析'
   els.ocrStatus.classList.remove('ocr-error')
   els.ocrText.value = ''
   autoResize()
 }
 
-function validateSelectedImage(file) {
+function validateSelectedMedia(file) {
   const extension = file.name.includes('.') ? file.name.split('.').pop().toLowerCase() : ''
-  if (!IMAGE_UPLOAD_RULES.extensions.includes(extension) || !IMAGE_UPLOAD_RULES.mimeTypes.includes(file.type)) {
-    return `“${file.name || '未命名文件'}”格式不正确。${IMAGE_UPLOAD_RULES.hint}`
+  if (!MEDIA_UPLOAD_RULES.extensions.includes(extension) || !MEDIA_UPLOAD_RULES.mimeTypes.includes(file.type)) {
+    return `“${file.name || '未命名文件'}”格式不正确。${MEDIA_UPLOAD_RULES.hint}`
   }
-  if (file.size > IMAGE_UPLOAD_RULES.maxBytes) {
-    return `“${file.name}”超过 10 MB。${IMAGE_UPLOAD_RULES.hint}`
+  if (file.size > MEDIA_UPLOAD_RULES.maxBytes) {
+    return `“${file.name}”超过 20 MB。${MEDIA_UPLOAD_RULES.hint}`
   }
-  if (!file.size) return `“${file.name}”内容为空。${IMAGE_UPLOAD_RULES.hint}`
+  if (!file.size) return `“${file.name}”内容为空。${MEDIA_UPLOAD_RULES.hint}`
   return ''
 }
 
-async function uploadImageForOcr(file) {
-  const validationError = validateSelectedImage(file)
+async function uploadMediaForAnalysis(file) {
+  const validationError = validateSelectedMedia(file)
   if (validationError) {
     showMessageModal(validationError)
     return
   }
 
   clearOcrAttachment()
-  const pending = { file, previewUrl: URL.createObjectURL(file), result: null }
+  const previewUrl = file.type.startsWith('image/') ? URL.createObjectURL(file) : ''
+  const pending = { file, previewUrl, result: null }
   state.ocrAttachment = pending
   state.ocrBusy = true
   els.ocrPreview.hidden = false
-  els.ocrThumbnail.src = pending.previewUrl
+  if (pending.previewUrl) {
+    els.ocrThumbnail.src = pending.previewUrl
+    els.ocrThumbnail.alt = '待解析图片预览'
+  } else {
+    els.ocrThumbnail.removeAttribute('src')
+    els.ocrThumbnail.alt = 'PDF 文件'
+  }
   els.ocrFilename.textContent = file.name
-  els.ocrStatus.textContent = '正在识别图片文字…'
+  els.ocrStatus.textContent = file.type === 'application/pdf' ? '正在解析 PDF…' : '正在理解图片…'
   els.ocrText.value = ''
   setBusy(state.busy)
 
   try {
     const form = new FormData()
     form.append('image', file, file.name)
-    const res = await apiFetch('/api/ocr', { method: 'POST', body: form })
+    const res = await apiFetch('/api/media/analyze', { method: 'POST', body: form })
     const data = await res.json().catch(() => ({}))
-    if (!res.ok) throw new Error(data.error || `OCR 请求失败（${res.status}）`)
+    if (!res.ok) throw new Error(data.error || `附件解析失败（${res.status}）`)
     // 用户可能在识别期间移除了图片，过期响应不能重新挂回输入框。
     if (state.ocrAttachment !== pending) return
     pending.result = data
-    els.ocrText.value = data.text || ''
-    if (data.text?.trim()) {
-      els.ocrStatus.textContent = `识别完成 · 置信度 ${Math.round(Number(data.confidence || 0))}%`
+    els.ocrText.value = data.analysis || ''
+    if (data.analysis?.trim()) {
+      const mode = data.mode === 'hybrid' ? '视觉 + OCR' : data.mode === 'vision' ? '视觉理解' : data.mode === 'local-pdf' ? '本地 PDF' : '本地 OCR'
+      const provider = data.provider ? ` · ${data.provider}${data.model ? `/${data.model}` : ''}` : ''
+      const confidence = data.confidence == null ? '' : ` · OCR 置信度 ${Math.round(Number(data.confidence))}%`
+      els.ocrStatus.textContent = `解析完成 · ${mode}${provider}${confidence}`
+      if (data.warning) showMessageModal(data.warning, '附件解析提示')
     } else {
-      els.ocrStatus.textContent = '未识别到文字，请换一张更清晰的图片'
+      els.ocrStatus.textContent = '没有获得可用的解析结果'
       els.ocrStatus.classList.add('ocr-error')
-      showMessageModal('图片上传成功，但没有识别到文字。请换一张文字更清晰的图片，或直接输入文字说明。', '未识别到文字')
+      showMessageModal('附件上传成功，但没有获得可用的解析结果。', '解析失败')
     }
   } catch (error) {
     if (state.ocrAttachment !== pending) return
@@ -1084,18 +1109,18 @@ async function uploadImageForOcr(file) {
   }
 }
 
-function handleImageFiles(files) {
+function handleMediaFiles(files) {
   const selected = Array.from(files || [])
   if (!selected.length) return
-  if (selected.length > IMAGE_UPLOAD_RULES.maxFiles) {
-    showMessageModal(`当前选择了 ${selected.length} 张图片，一次只能上传 1 张。${IMAGE_UPLOAD_RULES.hint}`)
+  if (selected.length > MEDIA_UPLOAD_RULES.maxFiles) {
+    showMessageModal(`当前选择了 ${selected.length} 个文件，一次只能上传 1 个。${MEDIA_UPLOAD_RULES.hint}`)
     return
   }
-  void uploadImageForOcr(selected[0])
+  void uploadMediaForAnalysis(selected[0])
 }
 
 els.btnUploadImage?.addEventListener('click', () => els.imageInput.click())
-els.imageInput?.addEventListener('change', () => handleImageFiles(els.imageInput.files))
+els.imageInput?.addEventListener('change', () => handleMediaFiles(els.imageInput.files))
 els.btnRemoveImage?.addEventListener('click', clearOcrAttachment)
 els.ocrText?.addEventListener('input', autoResize)
 els.composerBox?.addEventListener('dragover', (event) => {
@@ -1108,14 +1133,14 @@ els.composerBox?.addEventListener('drop', (event) => {
   if (!event.dataTransfer?.files?.length) return
   event.preventDefault()
   els.composerBox.classList.remove('dragging')
-  handleImageFiles(event.dataTransfer.files)
+  handleMediaFiles(event.dataTransfer.files)
 })
 document.addEventListener('paste', (event) => {
   if (state.busy) return
-  const images = Array.from(event.clipboardData?.files || []).filter((file) => file.type.startsWith('image/'))
-  if (!images.length) return
+  const media = Array.from(event.clipboardData?.files || []).filter((file) => MEDIA_UPLOAD_RULES.mimeTypes.includes(file.type))
+  if (!media.length) return
   event.preventDefault()
-  handleImageFiles(images)
+  handleMediaFiles(media)
 })
 
 els.btnMessageOk?.addEventListener('click', hideMessageModal)
@@ -1132,11 +1157,16 @@ async function sendMessage(raw) {
   const ocrText = els.ocrText.value.trim()
   const attachment = state.ocrAttachment?.result && ocrText
     ? {
-        type: 'ocr',
+        type: state.ocrAttachment.result.type,
         filename: state.ocrAttachment.result.filename,
         mimeType: state.ocrAttachment.result.mimeType,
-        text: ocrText,
+        analysis: ocrText,
+        ocrText: state.ocrAttachment.result.ocrText,
         confidence: state.ocrAttachment.result.confidence,
+        mode: state.ocrAttachment.result.mode,
+        provider: state.ocrAttachment.result.provider,
+        model: state.ocrAttachment.result.model,
+        warning: state.ocrAttachment.result.warning,
       }
     : null
   if ((!message && !attachment) || state.busy || state.ocrBusy) return
@@ -1147,7 +1177,7 @@ async function sendMessage(raw) {
   autoResize()
   els.btnSend.disabled = true
 
-  const displayMessage = message || '请理解并处理图片中的文字内容；如果意图不明确，请先向我确认。'
+  const displayMessage = message || '请理解并处理附件内容；如果意图不明确，请先向我确认。'
   appendUserMessage(displayMessage, attachment ? [attachment] : [])
   // 临时 shell，等服务端 messageId
   let assistant = appendAssistantShell('pending', { streaming: true })

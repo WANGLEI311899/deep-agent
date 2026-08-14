@@ -39,11 +39,20 @@ export interface UiMessage {
 }
 
 export interface MessageAttachment {
-  type: 'ocr'
+  /** `ocr` 为旧会话兼容值；新附件使用 image/pdf。 */
+  type: 'ocr' | 'image' | 'pdf'
   filename: string
   mimeType: string
-  text: string
+  /** 进入 Agent 上下文的可编辑解析结果，不保存原始二进制文件。 */
+  analysis?: string
+  /** 兼容旧版 OCR 会话，并保留本地识别结果供用户核对。 */
+  text?: string
+  ocrText?: string
   confidence?: number
+  mode?: 'hybrid' | 'vision' | 'ocr'
+  provider?: string
+  model?: string
+  warning?: string
 }
 
 export interface SessionSummary {

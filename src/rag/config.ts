@@ -17,6 +17,10 @@ export interface RagConfig {
   embeddingBaseUrl: string
   embeddingModel: string
   embeddingDimensions?: number
+  /** Ollama 本地 Embedding 作为无额度/限流时的兜底。 */
+  embeddingFallbackEnabled: boolean
+  embeddingFallbackBaseUrl: string
+  embeddingFallbackModel: string
   topK: number
   chunkSize: number
   chunkOverlap: number
@@ -28,6 +32,8 @@ export interface RagConfig {
   extensions: Set<string>
   ignoredDirectories: Set<string>
   ignoredFiles: Set<string>
+  /** 明确开启后才会调用视觉模型解析 PDF/图片，避免索引时产生意外费用。 */
+  multimodalEnabled: boolean
 }
 
 /**
@@ -43,9 +49,17 @@ export function loadRagConfig(): RagConfig {
   const dimensions = Number(process.env.RAG_EMBEDDING_DIMENSIONS)
   const chunkSize = positiveInt(process.env.RAG_CHUNK_SIZE, 700)
   const configuredOverlap = positiveInt(process.env.RAG_CHUNK_OVERLAP, 100)
+  const ollamaEnabled = truthy(process.env.OLLAMA_ENABLED)
+  const embeddingFallbackEnabled = ollamaEnabled || truthy(process.env.OLLAMA_EMBEDDING_ENABLED)
+  // PDF 文本层和扫描页 OCR 都可完全本地运行，因此不再强制要求云端 Key。
+  const multimodalEnabled = truthy(process.env.RAG_MULTIMODAL_ENABLED)
+  const defaultExtensions = [
+    '.md,.mdx,.txt,.json,.jsonl,.csv,.tsv,.html,.css,.js,.jsx,.ts,.tsx,.vue,.py,.java,.go,.rs,.sql,.yaml,.yml,.toml,.xml',
+    multimodalEnabled ? '.pdf' : '',
+  ].filter(Boolean).join(',')
 
   return {
-    enabled: truthy(process.env.RAG_ENABLED) && Boolean(embeddingApiKey),
+    enabled: truthy(process.env.RAG_ENABLED) && Boolean(embeddingApiKey || embeddingFallbackEnabled),
     embeddingApiKey,
     embeddingBaseUrl: (
       process.env.RAG_EMBEDDING_BASE_URL ?? 'https://api.openai.com/v1'
@@ -54,6 +68,9 @@ export function loadRagConfig(): RagConfig {
       process.env.RAG_EMBEDDING_MODEL?.trim() || 'text-embedding-3-small',
     embeddingDimensions:
       Number.isSafeInteger(dimensions) && dimensions > 0 ? dimensions : undefined,
+    embeddingFallbackEnabled,
+    embeddingFallbackBaseUrl: (process.env.OLLAMA_BASE_URL ?? 'http://127.0.0.1:11434/v1').replace(/\/$/, ''),
+    embeddingFallbackModel: process.env.OLLAMA_EMBEDDING_MODEL?.trim() || 'embeddinggemma',
     topK: positiveInt(process.env.RAG_TOP_K, 5),
     chunkSize,
     chunkOverlap: Math.min(configuredOverlap, Math.max(1, chunkSize - 1)),
@@ -67,8 +84,7 @@ export function loadRagConfig(): RagConfig {
     ),
     extensions: new Set(
       (
-        process.env.RAG_EXTENSIONS ||
-        '.md,.mdx,.txt,.json,.jsonl,.csv,.tsv,.html,.css,.js,.jsx,.ts,.tsx,.vue,.py,.java,.go,.rs,.sql,.yaml,.yml,.toml,.xml'
+        process.env.RAG_EXTENSIONS || defaultExtensions
       )
         .split(',')
         .map((item) => item.trim().toLowerCase())
@@ -87,5 +103,6 @@ export function loadRagConfig(): RagConfig {
         .map((item) => item.trim().toLowerCase())
         .filter(Boolean),
     ),
+    multimodalEnabled,
   }
 }

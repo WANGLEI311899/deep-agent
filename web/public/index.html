@@ -183,24 +183,24 @@
         <footer class="composer-wrap">
           <form class="composer" id="composer">
             <div class="composer-box" id="composerBox">
-              <!-- OCR 一期仅接收单图；隐藏 input 由按钮触发，拖拽和粘贴复用同一校验流程。 -->
+              <!-- 单附件多模态入口；图片与 PDF 复用同一套上传、校验和解析流程。 -->
               <input
                 id="imageInput"
                 class="visually-hidden"
                 type="file"
-                accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+                accept=".jpg,.jpeg,.png,.webp,.pdf,image/jpeg,image/png,image/webp,application/pdf"
               />
               <section class="ocr-preview" id="ocrPreview" hidden aria-live="polite">
                 <div class="ocr-file-row">
                   <img id="ocrThumbnail" class="ocr-thumbnail" alt="待识别图片预览" />
                   <div class="ocr-file-info">
                     <strong id="ocrFilename">—</strong>
-                    <span id="ocrStatus">准备识别</span>
+                    <span id="ocrStatus">准备解析</span>
                   </div>
                   <button id="btnRemoveImage" class="ocr-remove" type="button" aria-label="移除图片">×</button>
                 </div>
-                <label class="ocr-result-label" for="ocrText">OCR 识别结果（可修改）</label>
-                <textarea id="ocrText" class="ocr-text" rows="3" placeholder="识别出的文字会显示在这里…"></textarea>
+                <label class="ocr-result-label" for="ocrText">附件解析结果（可修改）</label>
+                <textarea id="ocrText" class="ocr-text" rows="4" placeholder="视觉理解或 OCR 结果会显示在这里…"></textarea>
               </section>
               <textarea
                 id="input"
@@ -210,11 +210,11 @@
               ></textarea>
               <div class="composer-bar">
                 <div class="composer-left">
-                  <button class="upload-btn" id="btnUploadImage" type="button" title="上传图片进行 OCR" aria-label="上传图片进行 OCR">
+                  <button class="upload-btn" id="btnUploadImage" type="button" title="上传图片或 PDF 进行解析" aria-label="上传图片或 PDF 进行解析">
                     <svg width="17" height="17" viewBox="0 0 18 18" fill="none" aria-hidden="true">
                       <path d="M3.5 10.5v3A1.5 1.5 0 0 0 5 15h8a1.5 1.5 0 0 0 1.5-1.5v-3M9 12V3m0 0L5.75 6.25M9 3l3.25 3.25" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
                     </svg>
-                    <span>图片</span>
+                    <span>附件</span>
                   </button>
                   <div class="composer-hint">
                     <span class="kbd">Enter</span>
@@ -249,15 +249,15 @@
       <div class="modal-panel message-panel" role="alertdialog" aria-modal="true" aria-labelledby="messageTitle" aria-describedby="messageText">
         <div class="modal-head">
           <div class="modal-badge high">提示</div>
-          <h2 id="messageTitle">图片上传失败</h2>
+          <h2 id="messageTitle">附件上传失败</h2>
         </div>
         <p class="modal-desc message-text" id="messageText"></p>
         <div class="upload-rules">
           <strong>上传要求</strong>
           <ul>
-            <li>格式：JPG/JPEG、PNG、WebP</li>
-            <li>数量：每次只能上传 1 张</li>
-            <li>大小：单张不超过 10 MB</li>
+              <li>格式：JPG/JPEG、PNG、WebP、PDF</li>
+              <li>数量：每次只能上传 1 个</li>
+              <li>大小：单个不超过 20 MB</li>
           </ul>
         </div>
         <div class="modal-actions">

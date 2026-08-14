@@ -111,6 +111,25 @@ docker run --rm -p 5173:5173 \
 - 单图上传、拖拽或粘贴截图，执行中英文 OCR 后结合文字指令识别意图
 - 可选 LlamaIndex 工作区知识库检索（自动更新索引并引用来源）
 
+## 图片、PDF 与视觉理解
+
+输入框支持图片和 PDF。默认依次尝试 OpenAI、Ollama、本地 OCR/PDF；OpenAI 发生额度或限流错误后会临时熔断，避免每次请求重复等待失败。文字型 PDF 使用本地文本层，扫描页会渲染后交给 Ollama 或 OCR。
+
+```env
+VISION_API_KEY=你的视觉服务密钥
+VISION_BASE_URL=https://api.openai.com/v1
+VISION_MODEL=gpt-4.1-mini
+
+# 无额度时的本地兜底
+OLLAMA_ENABLED=true
+OLLAMA_BASE_URL=http://127.0.0.1:11434/v1
+OLLAMA_VISION_MODEL=qwen3-vl:8b
+OLLAMA_EMBEDDING_MODEL=embeddinggemma
+OLLAMA_VISION_TIMEOUT_MS=300000
+```
+
+原始文件只在本次请求的内存中存在，会话仅保存可编辑的解析文本、文件名和模型信息。因此可以在后续轮次继续追问解析结果，同时避免原件长期落盘。
+
 ## 图片 OCR
 
 输入框支持上传、拖拽或粘贴一张图片。OCR 完成后会显示可编辑的识别结果，确认无误再发送给
@@ -127,13 +146,18 @@ Agent；只上传图片时，Agent 会尝试理解图片文字，意图不明确
 RAG 模块只负责文档切分、向量索引和检索，原有 DeepSeek Agent、Skill、HITL 和会话机制保持不变。
 索引缓存在 `.deepcodex/rag/`，文档或分块配置变化后会自动重建。
 
-先在 `.env` 配置一个 OpenAI-compatible embedding 服务：
+先在 `.env` 配置一个 OpenAI-compatible embedding 服务。开启 Ollama 后，OpenAI 不可用会自动切换本地模型并安全重建索引：
 
 ```env
 RAG_ENABLED=true
 RAG_EMBEDDING_API_KEY=你的-embedding-key
 RAG_EMBEDDING_BASE_URL=https://api.openai.com/v1
 RAG_EMBEDDING_MODEL=text-embedding-3-small
+OLLAMA_ENABLED=true
+OLLAMA_EMBEDDING_MODEL=embeddinggemma
+
+# 可选：允许索引过程调用视觉模型解析 PDF。默认关闭，防止意外费用。
+RAG_MULTIMODAL_ENABLED=true
 ```
 
 DeepSeek 当前聊天 Key 不作为 embedding Key 使用。配置完成后可以：
@@ -222,7 +246,16 @@ web/public/           # 前端静态页面
 | `OCR_LANG_PATH` | 空 | 可选的自建/离线 Tesseract 语言数据目录 |
 | `OCR_MAX_IMAGE_PIXELS` | `25000000` | 单图最大总像素数 |
 | `OCR_MAX_TEXT_CHARS` | `20000` | OCR 结果进入聊天上下文的最大字符数 |
+| `VISION_API_KEY` | 空 | 视觉/PDF模型密钥；留空时图片退回本地 OCR |
+| `VISION_BASE_URL` | OpenAI | 支持 Responses 图片/文件输入的 API 地址 |
+| `VISION_MODEL` | `gpt-4.1-mini` | OpenAI 图片与 PDF 解析模型 |
+| `OLLAMA_ENABLED` | `false` | 启用本地视觉与 Embedding 兜底 |
+| `OLLAMA_BASE_URL` | `http://127.0.0.1:11434/v1` | Ollama OpenAI-compatible 地址 |
+| `OLLAMA_VISION_MODEL` | `qwen3-vl:8b` | 本地视觉模型 |
+| `OLLAMA_EMBEDDING_MODEL` | `embeddinggemma` | 本地向量模型 |
+| `PDF_MAX_OCR_PAGES` | `20` | 扫描 PDF 单次最多解析页数 |
 | `RAG_ENABLED` | `false` | 是否启用工作区 LlamaIndex RAG |
+| `RAG_MULTIMODAL_ENABLED` | `false` | 是否允许 RAG 调用视觉模型索引 PDF |
 | `RAG_EMBEDDING_API_KEY` | 空 | 独立的 embedding 服务密钥 |
 | `RAG_EMBEDDING_BASE_URL` | OpenAI | OpenAI-compatible embedding 地址 |
 | `RAG_EMBEDDING_MODEL` | `text-embedding-3-small` | embedding 模型名 |

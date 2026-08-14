@@ -11,7 +11,14 @@ import {
   type NodeWithScore,
 } from 'llamaindex'
 import { loadRagConfig, type RagConfig } from './config.js'
-import { OpenAICompatibleEmbedding } from './openai-compatible-embedding.js'
+import {
+  EmbeddingProviderChangedError,
+  OpenAICompatibleEmbedding,
+} from './openai-compatible-embedding.js'
+import {
+  analyzeMedia,
+  validateMediaUpload,
+} from '../multimodal/media-service.js'
 
 interface IndexedFile {
   relativePath: string
@@ -21,11 +28,13 @@ interface IndexedFile {
 }
 
 interface RagManifest {
-  version: 1
+  version: 2
   workspacePath: string
   embeddingModel: string
   chunkSize: number
   chunkOverlap: number
+  /** 内容解析管线变化时强制重建，避免复用旧的纯文本索引。 */
+  contentPipeline: string
   generatedAt: string
   files: Array<Pick<IndexedFile, 'relativePath' | 'size' | 'modifiedAt'>>
 }
@@ -102,6 +111,14 @@ export class WorkspaceRagService {
           baseURL: config.embeddingBaseUrl,
           model: config.embeddingModel,
           dimensions: config.embeddingDimensions,
+          fallback: config.embeddingFallbackEnabled
+            ? {
+                name: 'Ollama',
+                apiKey: 'ollama',
+                baseURL: config.embeddingFallbackBaseUrl,
+                model: config.embeddingFallbackModel,
+              }
+            : undefined,
         })
       : null
   }
@@ -134,9 +151,15 @@ export class WorkspaceRagService {
       throw new Error('工作区没有可索引的文本文件。')
     }
 
-    const nodes = await this.withEmbedding(() =>
-      this.index!.asRetriever({ similarityTopK: Math.max(1, topK) }).retrieve(query),
-    )
+    let nodes: NodeWithScore[]
+    try {
+      nodes = await this.withEmbedding(() => this.index!.asRetriever({ similarityTopK: Math.max(1, topK) }).retrieve(query))
+    } catch (error) {
+      if (!(error instanceof EmbeddingProviderChangedError)) throw error
+      // 查询期间主服务失效时，使用新供应商完整重建后再重试一次。
+      await this.build(await this.collectFiles())
+      nodes = await this.withEmbedding(() => this.index!.asRetriever({ similarityTopK: Math.max(1, topK) }).retrieve(query))
+    }
     return {
       query,
       workspacePath: this.workspacePath,
@@ -172,12 +195,15 @@ export class WorkspaceRagService {
     this.lastCheckedAt = now
     const files = await this.collectFiles()
     const nextFiles = normalizedManifestFiles(files)
+    await this.embedding?.ensureProvider()
     await this.loadManifest()
 
     const compatible =
+      this.manifest?.version === 2 &&
       this.manifest?.embeddingModel === this.config.embeddingModel &&
       this.manifest.chunkSize === this.config.chunkSize &&
       this.manifest.chunkOverlap === this.config.chunkOverlap &&
+      this.manifest.contentPipeline === this.contentPipeline() &&
       sameFiles(this.manifest.files, nextFiles)
 
     if (compatible) {
@@ -188,15 +214,22 @@ export class WorkspaceRagService {
     return true
   }
 
-  private async build(files: IndexedFile[]): Promise<void> {
+  private async build(files: IndexedFile[], providerRetry = 1): Promise<void> {
     if (!files.length) {
       this.index = null
       this.manifest = null
       return
     }
-    const documents = await Promise.all(
+    const candidates = await Promise.all(
       files.map(async (file) => {
-        const text = await fs.readFile(file.absolutePath, 'utf8')
+        let text: string
+        try {
+          text = await this.readIndexText(file)
+        } catch (error) {
+          // 单个媒体文件解析失败不应阻断整个工作区索引；状态会在控制台明确可见。
+          console.warn(`[RAG] 跳过无法解析的文件 ${file.relativePath}:`, error)
+          return null
+        }
         return new Document({
           id_: file.relativePath.replace(/\\/g, '/'),
           text,
@@ -211,35 +244,70 @@ export class WorkspaceRagService {
         })
       }),
     )
+    const documents = candidates.filter((item) => item !== null)
+
+    if (!documents.length) {
+      this.index = null
+      this.manifest = null
+      return
+    }
 
     await this.resetPersistDir()
     // storageContext 初始化本身也会读取 Settings.embedModel，因此必须放在同一作用域内。
-    this.index = await this.withEmbedding(async () => {
-      const storageContext = await storageContextFromDefaults({
-        persistDir: this.persistDir,
+    try {
+      this.index = await this.withEmbedding(async () => {
+        const storageContext = await storageContextFromDefaults({ persistDir: this.persistDir })
+        const nodeParser = new SentenceSplitter({ chunkSize: this.config.chunkSize, chunkOverlap: this.config.chunkOverlap })
+        return Settings.withNodeParser(nodeParser, () => VectorStoreIndex.fromDocuments(documents, { storageContext, logProgress: false }))
       })
-      const nodeParser = new SentenceSplitter({
-        chunkSize: this.config.chunkSize,
-        chunkOverlap: this.config.chunkOverlap,
-      })
-      return Settings.withNodeParser(nodeParser, () =>
-        VectorStoreIndex.fromDocuments(documents, {
-          storageContext,
-          logProgress: false,
-        }),
-      )
-    })
+    } catch (error) {
+      if (error instanceof EmbeddingProviderChangedError && providerRetry > 0) {
+        await this.build(files, providerRetry - 1)
+        return
+      }
+      throw error
+    }
     this.manifest = {
-      version: 1,
+      version: 2,
       workspacePath: this.workspacePath,
       embeddingModel: this.config.embeddingModel,
       chunkSize: this.config.chunkSize,
       chunkOverlap: this.config.chunkOverlap,
+      contentPipeline: this.contentPipeline(),
       generatedAt: new Date().toISOString(),
       files: normalizedManifestFiles(files),
     }
     await fs.mkdir(this.cacheDir, { recursive: true })
     await fs.writeFile(this.manifestPath, JSON.stringify(this.manifest, null, 2), 'utf8')
+  }
+
+  private contentPipeline(): string {
+    const embedding = this.embedding?.providerSignature() ?? this.config.embeddingModel
+    if (!this.config.multimodalEnabled) return `text-v2:${embedding}`
+    return `multimodal-v2:${embedding}:${process.env.VISION_MODEL ?? 'gpt-4.1-mini'}:${process.env.OLLAMA_VISION_MODEL ?? 'qwen3-vl:8b'}`
+  }
+
+  /** 将 PDF/图片先转换为可检索 Markdown，其余文件保持原有 UTF-8 文本读取。 */
+  private async readIndexText(file: IndexedFile): Promise<string> {
+    const extension = path.extname(file.absolutePath).toLowerCase()
+    const mediaMime: Record<string, string> = {
+      '.pdf': 'application/pdf',
+      '.png': 'image/png',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.webp': 'image/webp',
+    }
+    const mimeType = mediaMime[extension]
+    if (!mimeType) return fs.readFile(file.absolutePath, 'utf8')
+    if (!this.config.multimodalEnabled) {
+      throw new Error('媒体 RAG 未启用，请配置 RAG_MULTIMODAL_ENABLED=true。')
+    }
+    const buffer = await fs.readFile(file.absolutePath)
+    const upload = validateMediaUpload(file.relativePath, mimeType, buffer)
+    const result = await analyzeMedia(upload, {
+      instruction: '为知识库检索提取完整内容。保留标题层级、表格、页码、图表含义和关键视觉信息。',
+    })
+    return `# ${file.relativePath}\n\n${result.analysis}`
   }
 
   private async loadPersistedIndex(): Promise<void> {
