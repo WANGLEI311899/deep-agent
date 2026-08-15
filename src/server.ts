@@ -22,6 +22,7 @@ import {
   type MessageAttachment,
 } from './sessions.js'
 import { WorkspaceStore } from './workspace-store.js'
+import { createSandBox, type SandboxContent } from './sandbox.js'
 import type { HitlRequestMeta } from './hitl.js'
 import {
   assertDeployConfig,
@@ -732,21 +733,79 @@ async function handleFiles(
   res: http.ServerResponse,
   userId: string,
 ): Promise<void> {
-  const existing = peekAgentForUser(userId)
+  const sandbox = getUserSandbox(userId)
+  const active = workspaces.getActive()
+  sendJson(res, 200, {
+    files: sandbox.listFiles(),
+    outputPath: sandbox.outputPath,
+    workspace:
+      userId === 'owner' || userId === 'local'
+        ? active
+        : { id: `user-${userId}`, name: '个人输出目录', path: sandbox.outputPath },
+  })
+}
+
+/**
+ * 获取当前账号唯一允许访问的文件沙箱。
+ * 即使 Agent 尚未初始化，也要能列出和下载上一次会话生成的文件。
+ */
+function getUserSandbox(userId: string): SandboxContent {
+  const existing = peekAgentForUser(userId)?.getSandbox()
+  if (existing) return existing
+
   const userOutputPath =
     userId === 'owner' || userId === 'local'
       ? workspaces.getActivePath()
       : path.resolve(process.cwd(), 'output', 'users', userId)
-  const sandbox = existing?.getSandbox()
-  const active = workspaces.getActive()
-  sendJson(res, 200, {
-    files: sandbox?.listFiles() ?? [],
-    outputPath: sandbox?.outputPath ?? userOutputPath,
-    workspace:
-      userId === 'owner' || userId === 'local'
-        ? active
-        : { id: `user-${userId}`, name: '个人输出目录', path: userOutputPath },
+
+  return createSandBox({ outputPath: userOutputPath, verbose: false })
+}
+
+/** 生成兼容中文文件名的 Content-Disposition 下载响应头。 */
+function downloadDisposition(filename: string): string {
+  const basename = path.basename(filename)
+  const asciiFallback = basename
+    .replace(/[^\x20-\x7e]/g, '_')
+    .replace(/["\\]/g, '_')
+  const utf8Name = encodeURIComponent(basename).replace(
+    /['()*]/g,
+    (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`,
+  )
+  return `attachment; filename="${asciiFallback || 'download'}"; filename*=UTF-8''${utf8Name}`
+}
+
+/** 下载文件时再次经过沙箱校验，禁止 ../、绝对路径和符号链接越界。 */
+function handleFileDownload(
+  res: http.ServerResponse,
+  userId: string,
+  encodedFilename: string,
+): void {
+  let filename: string
+  try {
+    filename = decodeURIComponent(encodedFilename)
+  } catch {
+    throw new AppError(ErrorCodes.InvalidRequest, '文件名编码无效。', 400, 'file_download')
+  }
+
+  const sandbox = getUserSandbox(userId)
+  if (!filename.trim() || path.isAbsolute(filename) || !sandbox.isPathSafe(filename)) {
+    throw new AppError(ErrorCodes.FilePathBlocked, '目标文件超出允许的输出目录。', 400, 'file_download')
+  }
+
+  const filePath = path.resolve(sandbox.outputPath, filename)
+  if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+    throw new AppError(ErrorCodes.NotFound, '文件不存在或已被删除。', 404, 'file_download')
+  }
+
+  const stat = fs.statSync(filePath)
+  res.writeHead(200, {
+    'Content-Type': contentType(filePath),
+    'Content-Length': stat.size,
+    'Content-Disposition': downloadDisposition(filename),
+    'Cache-Control': 'private, no-store',
+    'X-Content-Type-Options': 'nosniff',
   })
+  fs.createReadStream(filePath).pipe(res)
 }
 
 function rejectPublicWorkspaceMutation(res: http.ServerResponse): boolean {
@@ -899,6 +958,11 @@ const server = http.createServer(async (req, res) => {
     }
     if (method === 'GET' && url === '/api/files') {
       await handleFiles(res, userId)
+      return
+    }
+    const fileDownload = matchRoute(url, /^\/api\/files\/(.+)\/download$/)
+    if (method === 'GET' && fileDownload) {
+      handleFileDownload(res, userId, fileDownload[1])
       return
     }
     if (

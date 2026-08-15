@@ -268,6 +268,37 @@ ul {
   line-height: 1.35;
 }
 
+.file-item:not(.muted) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.file-name {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-download-btn {
+  flex: none;
+  border: 1px solid #d9e2d4;
+  border-radius: 7px;
+  padding: 3px 7px;
+  color: #46643f;
+  background: rgba(255, 255, 255, 0.8);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.file-download-btn:hover {
+  border-color: #a9c3a1;
+  background: #fff;
+}
+
 .skill-item:not(.muted):hover,
 .file-item:not(.muted):hover {
   background: var(--soft);

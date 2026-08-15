@@ -824,7 +824,11 @@ async function loadFiles() {
     els.fileList.innerHTML = files
       .map((f) => {
         const full = base ? `${base}\\${f}`.replace(/\\\\/g, '\\') : f
-        return `<li class="file-item" title="${escapeHtml(full)}">${escapeHtml(f)}</li>`
+        const encodedFile = escapeHtml(encodeURIComponent(f))
+        return `<li class="file-item" title="${escapeHtml(full)}">
+          <span class="file-name">${escapeHtml(f)}</span>
+          <button type="button" class="file-download-btn" data-download-file="${encodedFile}" title="下载到本机" aria-label="下载 ${escapeHtml(f)}">下载</button>
+        </li>`
       })
       .join('')
   } catch {
@@ -1036,6 +1040,34 @@ function clearOcrAttachment() {
   els.ocrText.value = ''
   autoResize()
 }
+
+/** 使用 fetch 携带访问口令，再通过 Blob 触发浏览器保存文件。 */
+async function downloadOutputFile(encodedFile) {
+  try {
+    const res = await apiFetch(`/api/files/${encodedFile}/download`)
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      throw new Error(data.error || `下载失败（HTTP ${res.status}）`)
+    }
+
+    const blobUrl = URL.createObjectURL(await res.blob())
+    const link = document.createElement('a')
+    link.href = blobUrl
+    link.download = decodeURIComponent(encodedFile).split(/[\\/]/).pop() || 'download'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(blobUrl)
+  } catch (error) {
+    showMessageModal(error.message || String(error), '文件下载失败')
+  }
+}
+
+els.fileList?.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-download-file]')
+  if (!button) return
+  void downloadOutputFile(button.dataset.downloadFile)
+})
 
 function validateSelectedMedia(file) {
   const extension = file.name.includes('.') ? file.name.split('.').pop().toLowerCase() : ''
