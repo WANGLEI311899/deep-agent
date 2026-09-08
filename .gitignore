@@ -38,6 +38,32 @@ Thumbs.db
 npm-debug.log*
 .deepcodex-ui*.log
 
+# Keep only the Lucide icons referenced by the task-canvas UI.
+web/public/vendor/lucide/
+web/public/vendor/lucide-icons/*
+!web/public/vendor/lucide-icons/arrow-right.svg
+!web/public/vendor/lucide-icons/blocks.svg
+!web/public/vendor/lucide-icons/bot.svg
+!web/public/vendor/lucide-icons/check.svg
+!web/public/vendor/lucide-icons/chevron-left.svg
+!web/public/vendor/lucide-icons/ellipsis.svg
+!web/public/vendor/lucide-icons/file-text.svg
+!web/public/vendor/lucide-icons/folder.svg
+!web/public/vendor/lucide-icons/folder-open.svg
+!web/public/vendor/lucide-icons/globe.svg
+!web/public/vendor/lucide-icons/house.svg
+!web/public/vendor/lucide-icons/list-tree.svg
+!web/public/vendor/lucide-icons/loader-circle.svg
+!web/public/vendor/lucide-icons/message-square.svg
+!web/public/vendor/lucide-icons/notebook-tabs.svg
+!web/public/vendor/lucide-icons/panel-left.svg
+!web/public/vendor/lucide-icons/paperclip.svg
+!web/public/vendor/lucide-icons/pause.svg
+!web/public/vendor/lucide-icons/search.svg
+!web/public/vendor/lucide-icons/send.svg
+!web/public/vendor/lucide-icons/settings.svg
+!web/public/vendor/lucide-icons/zap.svg
+
 # 证书 / 密钥材料
 *.pem
 *.key

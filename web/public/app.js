@@ -23,6 +23,8 @@ const els = {
   workspaceList: $('#workspaceList'),
   outputPathText: $('#outputPathText'),
   modelPill: $('#modelPill'),
+  utilityOutputPath: $('#utilityOutputPath'),
+  utilityModel: $('#utilityModel'),
   statusDot: $('#statusDot'),
   statusText: $('#statusText'),
   sessionTitle: $('#sessionTitle'),
@@ -44,6 +46,15 @@ const els = {
   btnClear: $('#btnClear'),
   btnNewChat: $('#btnNewChat'),
   btnToggleSidebar: $('#btnToggleSidebar'),
+  btnHistory: $('#btnHistory'),
+  btnRailHome: $('#btnRailHome'),
+  btnNavHome: $('#btnNavHome'),
+  btnNavChats: $('#btnNavChats'),
+  btnNavOutputs: $('#btnNavOutputs'),
+  btnNavSkills: $('#btnNavSkills'),
+  btnViewAllSessions: $('#btnViewAllSessions'),
+  btnChooseFolder: $('#btnChooseFolder'),
+  executionModes: $('#executionModes'),
   btnAddWorkspace: $('#btnAddWorkspace'),
   suggestions: $('#suggestions'),
   hitlModal: $('#hitlModal'),
@@ -94,6 +105,8 @@ const state = {
   /** 当前待发送的多模态附件；原始 File 只保存在本次页面内存中。 */
   ocrAttachment: null,
   ocrBusy: false,
+  /** 首页执行模式仅改变发送给智能体的约束，不改变用户看到的原始问题。 */
+  executionMode: 'auto',
 }
 
 /* ── Auth / API ─────────────────────────────────────────── */
@@ -447,6 +460,7 @@ els.messages.addEventListener('click', (e) => {
 function showMessagesView(has) {
   els.emptyState.hidden = has
   els.messages.hidden = !has
+  els.app?.classList.toggle('has-messages', has)
 }
 
 function clearMessagesDom() {
@@ -761,7 +775,9 @@ async function loadMeta() {
     const res = await apiFetch('/api/meta')
     if (!res.ok) throw new Error(`meta ${res.status}`)
     const data = await res.json()
-    els.modelPill.textContent = data.model || 'deepseek-v4-flash'
+    const model = data.model || 'deepseek-v4-flash'
+    els.modelPill.textContent = model
+    if (els.utilityModel) els.utilityModel.textContent = model
     if (data.multimodal) {
       const available = [
         data.multimodal.openai?.configured ? `OpenAI ${data.multimodal.openai.model}` : '',
@@ -814,6 +830,7 @@ async function loadFiles() {
     const data = await res.json()
     if (data.outputPath) {
       els.outputPathText.textContent = data.outputPath
+      if (els.utilityOutputPath) els.utilityOutputPath.textContent = data.outputPath
     }
     const files = data.files || []
     if (!files.length) {
@@ -846,7 +863,10 @@ async function loadWorkspaces() {
     state.activeWorkspaceId = data.activeId
     if (data.locked) state.workspacesLocked = true
     applyWorkspaceLockUi()
-    if (data.active?.path) els.outputPathText.textContent = data.active.path
+    if (data.active?.path) {
+      els.outputPathText.textContent = data.active.path
+      if (els.utilityOutputPath) els.utilityOutputPath.textContent = data.active.path
+    }
     renderWorkspaceList()
   } catch (err) {
     console.error(err)
@@ -951,8 +971,10 @@ async function saveWorkspace() {
     state.activeWorkspaceId = data.workspace?.activeId
     if (data.workspace?.active?.path) {
       els.outputPathText.textContent = data.workspace.active.path
+      if (els.utilityOutputPath) els.utilityOutputPath.textContent = data.workspace.active.path
     } else if (data.folder?.path) {
       els.outputPathText.textContent = data.folder.path
+      if (els.utilityOutputPath) els.utilityOutputPath.textContent = data.folder.path
     }
     renderWorkspaceList()
     await loadFiles()
@@ -994,6 +1016,7 @@ els.workspaceList?.addEventListener('click', async (e) => {
       state.activeWorkspaceId = data.workspace?.activeId
       if (data.workspace?.active?.path) {
         els.outputPathText.textContent = data.workspace.active.path
+        if (els.utilityOutputPath) els.utilityOutputPath.textContent = data.workspace.active.path
       }
       renderWorkspaceList()
       await loadFiles()
@@ -1017,7 +1040,10 @@ els.workspaceList?.addEventListener('click', async (e) => {
       if (!res.ok) throw new Error(data.error || '切换失败')
       state.workspaces = data.workspace?.folders || []
       state.activeWorkspaceId = data.workspace?.activeId
-      if (data.folder?.path) els.outputPathText.textContent = data.folder.path
+      if (data.folder?.path) {
+        els.outputPathText.textContent = data.folder.path
+        if (els.utilityOutputPath) els.utilityOutputPath.textContent = data.folder.path
+      }
       renderWorkspaceList()
       await loadFiles()
     } catch (err) {
@@ -1210,6 +1236,13 @@ async function sendMessage(raw) {
   els.btnSend.disabled = true
 
   const displayMessage = message || '请理解并处理附件内容；如果意图不明确，请先向我确认。'
+  const modeInstruction = {
+    plan: '请先给出清晰的执行计划，等待我确认后再执行。',
+    analysis: '请只进行分析并给出建议，不要写入文件或执行会产生变更的操作。',
+  }[state.executionMode]
+  const requestMessage = modeInstruction && message
+    ? modeInstruction + '\n\n用户任务：' + message
+    : message
   appendUserMessage(displayMessage, attachment ? [attachment] : [])
   // 临时 shell，等服务端 messageId
   let assistant = appendAssistantShell('pending', { streaming: true })
@@ -1223,7 +1256,7 @@ async function sendMessage(raw) {
     const res = await apiFetch('/api/chat', {
       method: 'POST',
       body: JSON.stringify({
-        message,
+        message: requestMessage,
         sessionId: state.sessionId,
         attachments: attachment ? [attachment] : [],
       }),
@@ -1384,12 +1417,44 @@ els.composer.addEventListener('submit', (e) => {
 })
 els.btnClear.addEventListener('click', () => clearCurrentSession())
 els.btnNewChat.addEventListener('click', () => createSession())
+
+/** 打开侧边抽屉并将用户带到对应的信息区域。 */
+function openSidebarSection(section) {
+  els.app.classList.add('sidebar-open')
+  const target = section === 'outputs'
+    ? $('.workspace-section')
+    : section === 'skills'
+      ? els.skillList
+      : els.sessionList
+  target?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+}
+
+function closeSidebar() {
+  els.app.classList.remove('sidebar-open')
+}
+
 els.btnToggleSidebar.addEventListener('click', () => {
-  if (window.matchMedia('(max-width: 860px)').matches) {
-    els.app.classList.toggle('sidebar-open')
-  } else {
-    els.app.classList.toggle('sidebar-collapsed')
-  }
+  els.app.classList.toggle('sidebar-open')
+})
+els.btnHistory?.addEventListener('click', () => openSidebarSection('chats'))
+els.btnNavChats?.addEventListener('click', () => openSidebarSection('chats'))
+els.btnNavOutputs?.addEventListener('click', () => openSidebarSection('outputs'))
+els.btnNavSkills?.addEventListener('click', () => openSidebarSection('skills'))
+els.btnViewAllSessions?.addEventListener('click', () => openSidebarSection('chats'))
+els.btnRailHome?.addEventListener('click', closeSidebar)
+els.btnNavHome?.addEventListener('click', closeSidebar)
+els.btnChooseFolder?.addEventListener('click', () => {
+  if (state.workspacesLocked) openSidebarSection('outputs')
+  else openWorkspaceModal('add')
+})
+
+els.executionModes?.addEventListener('click', (e) => {
+  const button = e.target.closest('[data-mode]')
+  if (!button) return
+  state.executionMode = button.dataset.mode || 'auto'
+  els.executionModes.querySelectorAll('[data-mode]').forEach((item) => {
+    item.classList.toggle('active', item === button)
+  })
 })
 els.suggestions?.addEventListener('click', (e) => {
   const btn = e.target.closest('button[data-prompt]')

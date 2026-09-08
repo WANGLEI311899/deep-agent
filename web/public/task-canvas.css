@@ -1,0 +1,366 @@
+
+/*
+ * Task Canvas 主题
+ * 这一段集中覆盖旧主题，后续维护时可整体调整或移除，不影响聊天、会话和目录逻辑。
+ */
+:root {
+  --rail-w: 84px;
+  --utility-h: 64px;
+  --canvas: #ffffff;
+  --utility: #f7f8f8;
+  --ink: #0d1b2a;
+  --muted: #657180;
+  --hairline: #dde3e7;
+  --green: #25ae78;
+  --green-dark: #16885b;
+  --green-soft: #e7f7f0;
+  --cyan: #258ec5;
+  --cyan-soft: #e6f4fb;
+  --amber: #d88900;
+  --amber-soft: #fff3d8;
+  --coral: #d95f56;
+  --radius: 8px;
+  --sidebar-w: 310px;
+  --font: 'Outfit', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+}
+
+html { font-size: 16px; }
+body,
+button,
+textarea,
+input { font-size: 15px; letter-spacing: 0; }
+
+.ui-icon { display: block; width: 1em; height: 1em; object-fit: contain; opacity: .9; }
+
+.app,
+.app.sidebar-collapsed {
+  grid-template-columns: var(--rail-w) minmax(0, 1fr);
+  background: var(--canvas);
+}
+
+.nav-rail {
+  grid-column: 1;
+  grid-row: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  height: 100dvh;
+  padding: 22px 7px 16px;
+  border-right: 1px solid var(--hairline);
+  background: #fbfcfc;
+  z-index: 30;
+}
+
+.rail-brand,
+.rail-avatar {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 8px;
+  color: #fff;
+  background: var(--green);
+  font-weight: 700;
+  font-size: 17px;
+}
+
+.rail-nav {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.rail-btn {
+  display: flex;
+  width: 100%;
+  min-height: 64px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 8px;
+  color: #293745;
+  font-size: 13px;
+}
+
+.rail-btn .ui-icon { width: 23px; height: 23px; }
+.rail-btn:hover,
+.rail-btn.active { color: #12392d; background: var(--green-soft); }
+.rail-settings { margin-top: auto; min-height: 54px; }
+.rail-avatar { width: 38px; height: 38px; margin-top: 2px; color: var(--green-dark); background: #edf1f2; font-size: 14px; }
+
+/* 旧侧栏改为抽屉，保留完整的会话、目录、技能和文件能力。 */
+.sidebar,
+.app.sidebar-collapsed .sidebar {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: var(--rail-w);
+  width: var(--sidebar-w);
+  height: 100dvh;
+  padding: 22px 16px;
+  gap: 18px;
+  border-right: 1px solid var(--hairline);
+  background: #fbfcfc;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-18px);
+  transition: opacity .18s ease, transform .18s ease;
+  z-index: 25;
+}
+
+.app.sidebar-open .sidebar {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(0);
+  box-shadow: 18px 0 42px rgba(13, 27, 42, .08);
+}
+
+.sidebar .brand { display: none; }
+.sidebar-top { gap: 0; }
+.btn-new { min-height: 44px; justify-content: center; padding: 10px 14px; border: 0; border-radius: 8px; color: #fff; background: var(--green); box-shadow: none; font-size: 15px; }
+.btn-new:hover { color: #fff; background: var(--green-dark); box-shadow: none; }
+.sidebar > .sidebar-section,
+.sidebar > .sidebar-section:not(.grow):not(.workspace-section),
+.sidebar > .sidebar-foot { display: flex; }
+.sidebar-section.grow { flex: 0 1 260px; min-height: 150px; }
+.section-label { padding: 0 4px; color: #6e7883; font-size: 12px; }
+.section-subtitle { color: #8a949e; font-size: 11px; }
+.session-item,
+.workspace-item,
+.skill-item,
+.file-item { border-radius: 6px; }
+.sidebar-foot { margin-top: auto; }
+
+.main {
+  grid-column: 2;
+  grid-row: 1;
+  position: relative;
+  display: grid;
+  grid-template-rows: 64px minmax(0, 1fr) var(--utility-h);
+  min-width: 0;
+  height: 100dvh;
+  background: var(--canvas);
+}
+
+.topbar {
+  min-height: 64px;
+  padding: 0 30px;
+  border-bottom: 1px solid transparent;
+  background: rgba(255, 255, 255, .96);
+}
+.topbar > .icon-btn,
+.topbar-title,
+.topbar-actions > .btn-ghost { display: none; }
+.topbar-actions { margin-left: auto; }
+.history-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  padding: 0 4px 0 18px;
+  border-left: 1px solid var(--hairline);
+  color: var(--ink);
+  font-weight: 600;
+}
+.history-btn .ui-icon { width: 19px; height: 19px; }
+.history-btn .ui-icon:last-child { margin-left: 8px; width: 16px; }
+.history-btn:hover { color: var(--green-dark); }
+
+.chat-scroll {
+  grid-row: 2;
+  padding: 0 48px 40px;
+  background: var(--canvas);
+}
+
+.empty-state {
+  max-width: 1060px;
+  margin: 0 auto;
+  padding: 12px 0 36px;
+  text-align: left;
+}
+
+.home-brand { display: flex; flex-direction: column; align-items: center; color: var(--muted); }
+.home-brand strong { color: var(--ink); font-size: 46px; line-height: 1.05; font-weight: 700; }
+.home-brand span { margin-top: 12px; font-size: 22px; }
+.empty-state h1 { margin: 40px 0 10px; color: var(--ink); font-size: 40px; line-height: 1.15; font-weight: 700; text-align: center; }
+.empty-lead { margin: 0; color: var(--muted); font-size: 18px; text-align: center; }
+
+/* 首页输入框定位在标题与模式之间；进入会话后自动回到底部。 */
+.composer-wrap {
+  position: absolute;
+  top: 332px;
+  left: 50%;
+  z-index: 8;
+  width: min(1060px, calc(100% - 96px));
+  padding: 0;
+  border: 0;
+  background: transparent;
+  transform: translateX(-50%);
+}
+.composer { max-width: none; }
+.composer-box { min-height: 178px; padding: 20px 22px 14px; border: 1px solid #cfd8de; border-radius: 8px; background: #fff; box-shadow: none; }
+.composer-box:focus-within { border-color: #8ebdac; box-shadow: 0 0 0 3px rgba(37, 174, 120, .1); }
+#input { min-height: 82px; max-height: 104px; font-size: 17px; }
+.composer-bar { min-height: 44px; }
+.composer-left { gap: 0; }
+.upload-btn,
+.composer-tool { display: inline-flex; align-items: center; gap: 8px; min-height: 38px; padding: 0 12px; color: #52606e; border-right: 1px solid var(--hairline); font-size: 14px; }
+.composer-tool:last-of-type { border-right: 0; }
+.upload-btn:hover,
+.composer-tool:hover { color: var(--green-dark); background: #f5faf8; }
+.upload-btn .ui-icon,
+.composer-tool .ui-icon { width: 19px; height: 19px; }
+.composer-hint { margin-left: auto; margin-right: 16px; }
+.send-btn { width: 50px; height: 50px; border-radius: 8px; background: var(--green); box-shadow: none; }
+.send-btn .ui-icon { width: 21px; height: 21px; filter: brightness(0) invert(1); }
+.send-btn:hover:not(:disabled) { background: var(--green-dark); }
+.disclaimer { display: none; }
+
+.execution-modes {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  max-width: 850px;
+  margin: 249px auto 0;
+  padding: 6px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: var(--utility);
+}
+.mode-btn { display: flex; min-height: 68px; align-items: center; gap: 18px; padding: 10px 34px; border-right: 1px solid var(--hairline); border-radius: 6px; color: #465462; text-align: left; }
+.mode-btn:last-child { border-right: 0; }
+.mode-btn .ui-icon { width: 27px; height: 27px; flex: 0 0 auto; }
+.mode-btn span { display: flex; flex-direction: column; gap: 3px; }
+.mode-btn strong { color: var(--ink); font-size: 16px; }
+.mode-btn small { color: #74808c; font-size: 13px; }
+.mode-btn:hover { background: #fff; }
+.mode-btn.active { color: var(--green-dark); background: var(--green-soft); }
+.mode-btn.active strong { color: var(--green-dark); }
+
+.recent-head { display: flex; align-items: center; justify-content: space-between; margin-top: 31px; }
+.recent-head h2 { margin: 0; color: var(--ink); font-size: 20px; }
+.recent-head button { display: inline-flex; align-items: center; gap: 8px; color: #43515e; font-size: 14px; }
+.recent-head button:hover { color: var(--green-dark); }
+.recent-head .ui-icon { width: 16px; height: 16px; }
+
+.suggestions { display: flex; flex-direction: column; gap: 0; margin-top: 12px; }
+.suggestions button,
+.suggestions button:nth-child(even) {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto 150px 28px;
+  min-height: 76px;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 4px;
+  border: 0;
+  border-bottom: 1px solid var(--hairline);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  text-align: left;
+}
+.suggestions button::before,
+.suggestions button::after { display: none; }
+.suggestions button:hover,
+.suggestions button:nth-child(even):hover { border-color: var(--hairline); background: #fafcfc; box-shadow: none; transform: none; }
+.task-status { display: grid; width: 30px; height: 30px; place-items: center; border: 2px solid currentColor; border-radius: 50%; }
+.task-status .ui-icon { width: 17px; height: 17px; }
+.task-status.success { color: var(--green); background: var(--green); border-color: var(--green); }
+.task-status.success .ui-icon { filter: brightness(0) invert(1); }
+.task-status.running { color: var(--cyan); border-right-color: #b6ddef; }
+.task-status.waiting { color: var(--amber); }
+.suggestions .sug-body { width: auto; padding: 0; gap: 4px; background: transparent; box-shadow: none; }
+.suggestions .sug-title { color: var(--ink); font-size: 16px; font-weight: 650; }
+.suggestions .sug-desc { max-width: none; color: #6b7681; font-size: 13px; white-space: normal; }
+.task-badge { min-width: 68px; padding: 5px 10px; border-radius: 8px; text-align: center; font-size: 12px; font-weight: 600; }
+.task-badge.done { color: var(--green-dark); background: var(--green-soft); }
+.task-badge.working { color: #176d9d; background: var(--cyan-soft); }
+.task-badge.approval { color: #9b6300; background: var(--amber-soft); }
+.suggestions time { color: #71808d; font-size: 13px; }
+.task-more { width: 18px; height: 18px; color: #43515e; }
+
+.utility-bar {
+  grid-row: 3;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+  padding: 0 28px;
+  border-top: 1px solid var(--hairline);
+  background: #fbfcfc;
+  color: #43515e;
+  z-index: 12;
+}
+.utility-path,
+.utility-model,
+.utility-status { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.utility-path .ui-icon,
+.utility-model .ui-icon { width: 19px; height: 19px; }
+.utility-path strong { max-width: min(430px, 35vw); overflow: hidden; padding: 8px 12px; border: 1px solid var(--hairline); border-radius: 6px; background: #f2f4f5; color: #607080; font-family: var(--mono); font-size: 12px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+#btnChooseFolder { display: inline-flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 12px; border: 1px solid #cfd8de; border-radius: 6px; background: #fff; color: #344350; }
+#btnChooseFolder:hover { border-color: #9bc8b8; color: var(--green-dark); }
+#btnChooseFolder .ui-icon { width: 17px; height: 17px; }
+.utility-model { margin-left: auto; padding-left: 24px; border-left: 1px solid var(--hairline); }
+.utility-model strong { min-width: 178px; padding: 8px 12px; border: 1px solid #cfd8de; border-radius: 6px; color: var(--ink); font-size: 13px; font-weight: 500; }
+.utility-status { padding-left: 24px; border-left: 1px solid var(--hairline); }
+.utility-status .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--green); }
+
+/* 对话状态继续采用原有结果优先布局，并让输入区固定在底部工具栏上方。 */
+.app.has-messages .topbar { border-bottom-color: var(--hairline); }
+.app.has-messages .topbar > .icon-btn,
+.app.has-messages .topbar-title,
+.app.has-messages .topbar-actions > .btn-ghost { display: inline-flex; }
+.app.has-messages .history-btn { display: none; }
+.app.has-messages .chat-scroll { padding-top: 24px; padding-bottom: 180px; }
+.app.has-messages .composer-wrap { top: auto; bottom: calc(var(--utility-h) + 12px); }
+.app.has-messages .composer-box { min-height: auto; }
+.app.has-messages #input { min-height: 44px; }
+.app.has-messages .messages { max-width: 920px; }
+
+@media (max-width: 1050px) {
+  .composer-wrap { width: calc(100% - 48px); }
+  .chat-scroll { padding-right: 24px; padding-left: 24px; }
+  .mode-btn { padding: 10px 18px; gap: 12px; }
+  .suggestions button { grid-template-columns: 40px minmax(0, 1fr) auto 126px 24px; }
+  .utility-model span,
+  .utility-path > span { display: none; }
+}
+
+@media (max-width: 760px) {
+  :root { --rail-w: 64px; --utility-h: 56px; }
+  .nav-rail { padding: 14px 5px 10px; }
+  .rail-brand { width: 38px; height: 38px; }
+  .rail-btn { min-height: 54px; font-size: 11px; }
+  .rail-btn .ui-icon { width: 20px; height: 20px; }
+  .sidebar { left: var(--rail-w); width: min(320px, calc(100vw - var(--rail-w))); }
+  .topbar { padding: 0 16px; }
+  .history-btn { padding-left: 12px; }
+  .home-brand strong { font-size: 34px; }
+  .home-brand span { font-size: 17px; }
+  .empty-state h1 { margin-top: 28px; font-size: 30px; }
+  .empty-lead { font-size: 15px; }
+  .composer-wrap { top: 276px; width: calc(100% - 28px); }
+  .composer-box { min-height: 160px; padding: 16px 14px 10px; }
+  #input { min-height: 74px; }
+  .composer-tool { display: none; }
+  .composer-hint { display: none; }
+  .execution-modes { grid-template-columns: 1fr; max-width: none; margin-top: 220px; }
+  .mode-btn { min-height: 58px; border-right: 0; border-bottom: 1px solid var(--hairline); }
+  .mode-btn:last-child { border-bottom: 0; }
+  .recent-head { margin-top: 26px; }
+  .suggestions button { grid-template-columns: 36px minmax(0, 1fr) auto; gap: 10px; }
+  .suggestions time,
+  .task-more { display: none; }
+  .task-badge { min-width: 62px; }
+  .suggestions .sug-desc { line-height: 1.35; }
+  .utility-bar { gap: 10px; padding: 0 12px; }
+  .utility-path strong { max-width: 34vw; }
+  #btnChooseFolder { width: 36px; padding: 0; justify-content: center; font-size: 0; }
+  .utility-model { padding-left: 10px; }
+  .utility-model strong { min-width: 0; max-width: 24vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .utility-status { display: none; }
+  .app.has-messages .composer-wrap { bottom: calc(var(--utility-h) + 8px); }
+}

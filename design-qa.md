@@ -1,205 +1,68 @@
-# Design QA — Outcome First Workspace
+# Design QA
 
-## 执行工具胶囊标签（2026-07-25）
+## Evidence
 
-- Source visual truth: 本轮用户提供的执行过程截图（会话附件，无本地文件路径）
-- Implementation screenshot: unavailable（本地浏览器页面读取连续超时）
-- Viewport: 参考截图 2048 × 571；实现沿用当前桌面端响应式布局
-- Source pixels: 2048 × 571
-- Implementation pixels / CSS size / density: unavailable
-- State: 已完成的 `skill_scan` 与展开的 `weather_lookup` 执行卡片
+- Source visual truth: `C:\Users\汪蕾\.codex\generated_images\01a07fb2-741d-7811-b33b-a48803fa5931\call_CtmQjRrfge3Oms2qSQO4rNqN.png`
+- Source pixels: `1487 x 1058`
+- Intended CSS viewport: `1440 x 1024`, density `1x`
+- Implementation URL: `http://localhost:5173/`
+- Implementation screenshot: `D:\newProgrom\deep-agent-demo\output\design-audit\08-task-canvas-home-pass2.png`
+- Mobile implementation screenshot: `D:\newProgrom\deep-agent-demo\output\design-audit\09-task-canvas-mobile.png`
+- Side-by-side comparison: `D:\newProgrom\deep-agent-demo\output\design-audit\10-task-canvas-side-by-side-pass2.png`
+- State: authenticated empty-task home screen, light theme, automatic execution selected
+- Browser-rendered evidence: Playwright Core rendered the implementation with system Edge at `1440 x 1024`, density `1x`; the screenshot contains the full task canvas and persistent utility bar.
 
-### Full-view comparison evidence
+## Full-View Comparison
 
-无法取得浏览器渲染截图，因此未进行有效的全视图并排比较。代码已为执行卡片补充工具类型标记，并仅将 `skill_scan` 与 `weather_lookup` 的标识改为侧栏“使用中”同色系胶囊。
+The `1487 x 1058` source was normalized to `1440 x 1024` and placed beside the `1440 x 1024` implementation. Pass 1 found that the execution-mode selector was roughly `200px` too wide and the recent-task section sat about `10px` too low. Pass 2 shows the mode selector centered at `850px` wide and the recent-task header aligned to the target rhythm. No actionable P0/P1/P2 differences remain.
 
-### Focused region comparison evidence
+## Focused Region Comparison
 
-参考图中重点区域为 `Skill`、`WE` 与左侧“使用中”标签。实现统一使用浅绿色背景 `#eff5e9`、深绿色文字 `#54784b`、圆角、较轻字重和自适应宽度；浏览器实际像素尺寸尚未捕获。
+The composer, execution-mode selector, recent-task rows, navigation rail, and utility bar are readable in the full-resolution comparison. Separate crops were unnecessary because all typography, icons, borders, and state badges remain legible at the combined image's original `2880 x 1068` resolution.
 
-### Findings
+## Fidelity Surface Review
 
-- [P2] 缺少浏览器渲染证据
-  - Location: 执行过程中的 Skill / WE 标签。
-  - Evidence: 源截图可见，但本地页面读取连续超时，无法取得实现截图。
-  - Impact: 无法确认不同缩放比例下的最终对齐和文字基线。
-  - Fix: 浏览器连接恢复后，打开包含天气执行过程的历史会话并补充同区域截图。
+- Fonts and typography: the existing Outfit and Chinese system-font stack reproduces the source hierarchy, weights, wrapping, and zero letter spacing without clipping.
+- Spacing and layout rhythm: the rendered `84px` rail, centered `1060px` composer/task list, `850px` mode selector, and `64px` utility bar match the source composition after the pass-1 correction.
+- Colors and visual tokens: the white canvas, neutral dividers, green primary state, cyan progress, and amber approval states match the selected direction with readable contrast.
+- Image quality and asset fidelity: the design contains no photographic imagery. Visible controls use Lucide static SVG assets rather than handcrafted SVG or CSS drawings.
+- Copy and content: the selected Chinese task-workbench labels and three realistic recent-task states are implemented.
 
-### Required fidelity surfaces
+## Primary Interactions Tested
 
-- Fonts and typography: 标签改用产品现有界面字体，10.5px / 600；渲染待检查。
-- Spacing and layout rhythm: 自适应宽度、25px 高度、7px 圆角；渲染待检查。
-- Colors and visual tokens: 与“使用中”保持 `#54784b` / `#eff5e9`。
-- Image quality and asset fidelity: 本次不涉及图片资产。
-- Copy and content: 保留 `Skill` 与 `WE` 原文，不改变工具标题和状态。
+- Initial authenticated home screen and dynamic metadata loaded successfully.
+- Selecting `先规划` set the corresponding mode button to active.
+- Entering task text enabled the send control; clearing the text disabled it again.
+- Opening `历史记录` set the application drawer state to open.
+- All 22 visible Lucide icon assets reported valid natural dimensions.
+- At `390 x 844`, document width equaled viewport width (`390px`) with no horizontal overflow.
+- No external message or agent request was submitted during QA.
 
-### Primary interactions and console
+## Console Errors
 
-- 执行卡片展开/收起逻辑未修改。
-- JavaScript 语法检查与项目构建通过。
-- 浏览器控制台检查因页面读取超时而未完成。
-
-### Comparison history
-
-- 首轮：完成代码对齐；浏览器截图验证受阻，未进入视觉迭代。
-
-final result: blocked
-
----
-
-- Source visual truth: `C:\Users\汪蕾\.codex\generated_images\019f6de2-f5ae-7490-82f2-a79e2fa2071e\exec-37566e7d-b57d-494c-8694-3a6931fa40e1.png`
-- Implementation screenshot: `D:\newProgrom\deep-agent-demo\output\design-audit\04-outcome-first-final.png`
-- Side-by-side evidence: `D:\newProgrom\deep-agent-demo\output\design-audit\05-side-by-side-comparison.png`
-- Viewport: 1440 × 1024
-- State: existing weather conversation, latest completed answer, execution details collapsed
-
-## Full-view comparison evidence
-
-The implementation matches the selected direction's main hierarchy: calm narrow sidebar, top readiness strip, answer-first assistant block, secondary collapsible execution process, and pinned composer. The implementation intentionally keeps generic Markdown answers instead of the mock's weather-only metric visualization because deepCodex must support arbitrary agent tasks.
-
-## Focused region comparison evidence
-
-The answer/process/composer region was checked at the same desktop viewport. Typography, border weight, spacing, pale mint surfaces, emerald accent, result label, execution count, and composer elevation follow the source. No additional focused crop was needed because the relevant text and controls are readable in the full-resolution side-by-side image.
+- Final Playwright desktop and mobile checks reported no page or console errors. The missing favicon response was excluded because it is unrelated to this UI change.
 
 ## Findings
 
-- [P3] The mock has weather-specific pictograms and metric columns, while the implementation uses the real generic Markdown response.
-  - Location: assistant result panel.
-  - Evidence: source shows a weather visualization; implementation shows the actual server response.
-  - Impact: slightly lower visual richness for weather queries, but preserves correct behavior for every other task type.
-  - Follow-up: add typed result renderers later only when the API exposes structured result schemas.
+- No actionable P0/P1/P2 findings remain.
+- [P3] Intentional state and data differences
+  Location: composer send button and bottom utility bar.
+  Evidence: the source depicts an enabled send button with an empty task and placeholder path/model values; the implementation keeps send disabled until text exists and displays the live output path and configured model.
+  Impact: slightly different appearance, but more accurate and safer product behavior.
+  Fix: none; retain the functional implementation.
 
-## Required fidelity surfaces
+## Comparison History
 
-- Fonts and typography: Outfit and JetBrains Mono remain consistent with the product; answer body is 15px/1.75 and hierarchy is legible.
-- Spacing and layout rhythm: 248px sidebar, 900px reading width, 28px message rhythm, and pinned composer closely match the selected composition.
-- Colors and visual tokens: pale neutral background, white answer surface, subtle mint borders, and a single green semantic accent match the source direction.
-- Image quality and asset fidelity: the source contains no required raster imagery. Existing product marks and controls remain crisp; no placeholder imagery was introduced.
-- Copy and content: real session, tool, weather, file, and model data remain intact. New labels “结果”, “执行过程”, step count, and completion status use concise Chinese copy.
+- Pass 1 evidence: `output/design-audit/07-task-canvas-side-by-side.png`. Finding: execution modes were too wide and recent tasks were too low.
+- Fixes: constrained the mode selector to `850px`, centered it, adjusted its top margin, moved the recent-task header upward, and moved shortcut hints beside the send button.
+- Pass 2 evidence: `output/design-audit/10-task-canvas-side-by-side-pass2.png`. The earlier P2 layout differences are resolved.
+- Earlier prototype screenshots `01` through `05` represent the previous UI and are excluded from this redesign's acceptance evidence.
 
-## Comparison history
+## Implementation Checklist
 
-### Pass 1
-
-- [P2] Sidebar file/workspace lists exposed a horizontal scrollbar and made the sidebar look denser than the source.
-- Fix: constrained list overflow to the vertical axis and allowed workspace content to shrink within its grid cell.
-- Post-fix evidence: `output/design-audit/04-outcome-first-final.png` shows the sidebar without the horizontal scrollbar.
-
-### Pass 2
-
-- No actionable P0/P1/P2 differences remain.
-- Execution disclosure opened and closed successfully; composer text enabled the send action and clearing the field disabled it again; browser console reported zero errors.
-
-## Implementation checklist
-
-- [x] Answer is shown before execution details.
-- [x] Execution details display a live step count and expand for running, approval, or error states.
-- [x] Completed execution details collapse automatically.
-- [x] Sidebar overflow is controlled.
-- [x] Composer and existing core interactions remain functional.
-
-## Follow-up polish
-
-- P3: add schema-driven rich result renderers for weather and future structured tools without changing generic Markdown behavior.
+- Desktop source and implementation normalized at `1440 x 1024`, density `1x`.
+- Typography, spacing, colors, icons, content, and desktop/mobile overflow reviewed.
+- Primary interactions verified without submitting an agent request.
+- No remaining P0/P1/P2 issue requires another iteration.
 
 final result: passed
-
----
-
-# Design QA — 微信式左右对话（2026-07-22）
-
-- Source visual truth: 本轮用户提供的桌面端对话截图（无本地文件路径）
-- Implementation screenshot: unavailable
-- Viewport: 参考图约 2048 × 1342；实现包含桌面端和 `max-width: 860px` 移动端布局
-- Source pixels: 2048 × 1342（会话附件显示尺寸）
-- Implementation pixels / CSS size / density: unavailable
-- State: 用户消息、模型流式回复、执行过程和固定输入框
-
-## Full-view comparison evidence
-
-当前浏览器控制通道不可用，无法捕获本地实现并与参考图合成同视口对比。代码已将用户行反向排列到右侧，并保持模型回复、流式光标和执行过程在左侧，但不能仅依据代码判定视觉一致。
-
-## Focused region comparison evidence
-
-未能捕获用户气泡、模型回复头部和移动端断点的渲染截图，因此无法检查实际折行、气泡宽度、头像基线以及长 Markdown 内容的视觉平衡。
-
-## Findings
-
-- [P2] 缺少浏览器渲染证据
-  - Location: 对话消息区。
-  - Evidence: 有参考截图和完成构建的实现，但没有同状态实现截图。
-  - Impact: 无法确认不同消息长度下的右对齐效果及移动端是否出现拥挤。
-  - Fix: 浏览器控制恢复后，在桌面端和 390px 移动端分别发送一条短消息与一条长消息，捕获流式生成状态并与参考图对比。
-
-## Required fidelity surfaces
-
-- Fonts and typography: 保留现有 Outfit 与中文系统字体、字号和 Markdown 排版；渲染待检查。
-- Spacing and layout rhythm: 用户消息右侧排列、模型消息左侧排列，并对移动端缩小头像与间距；渲染待检查。
-- Colors and visual tokens: 用户气泡使用现有浅绿色语义色，模型结果面板沿用白色卡片；实际对比度待检查。
-- Image quality and asset fidelity: 本次对话布局不新增图片资产，沿用文字头像。
-- Copy and content: 未改变消息内容、状态文案、工具过程或 SSE 流式数据。
-
-## Comparison history
-
-- 本轮无法取得浏览器截图，尚未开始有效的视觉对比迭代。
-
-## Implementation checklist
-
-- [x] 用户消息与头像靠右展示。
-- [x] 模型回复与头像靠左展示。
-- [x] 保留流式光标、Markdown、工具过程和历史消息渲染。
-- [x] 增加移动端响应式间距。
-- [ ] 补充桌面与移动端浏览器截图验证。
-
-## Follow-up polish
-
-- 根据真实截图微调长消息最大宽度和头像与气泡的垂直对齐。
-
-final result: blocked
-
----
-
-# Design QA — 职决参考主题（2026-07-21）
-
-- Source visual truth: 本轮对话中用户提供的桌面端参考截图（无本地文件路径）
-- Implementation screenshot: unavailable
-- Viewport: 参考图约 2048 × 1080；实现同时包含 `max-width: 860px` 的移动端适配
-- State: 首页空状态
-
-## Full-view comparison evidence
-
-参考截图已用于提取暖白主背景、浅灰侧栏、深橄榄绿标题、柔和绿色强调色、白色入口卡片和大圆角悬浮输入框等视觉特征。当前环境无法连接受控浏览器，因此不能生成同视口实现截图或合成并排对比图。
-
-## Focused region comparison evidence
-
-无法进行浏览器渲染后的局部截图比较。代码检查确认主题覆盖仅作用于 CSS；页面的 DOM 标识、现有文案、事件监听和 API 行为未在本轮修改。
-
-## Findings
-
-- [P2] 缺少浏览器渲染证据
-  - Location: 首页桌面端与移动端。
-  - Evidence: 有参考截图，但无可用的实现截图。
-  - Impact: 无法确认真实字体渲染、折行、视口高度和移动端抽屉状态是否存在视觉偏差。
-  - Fix: 在受控浏览器恢复后，以桌面端和 390 × 844 分别截图并进行并排复核。
-
-## Required fidelity surfaces
-
-- Fonts and typography: 使用现有 Outfit，并补充苹方、微软雅黑和系统字体回退；浏览器渲染待核验。
-- Spacing and layout rhythm: 已按参考图重设 270px 侧栏、820px 空状态内容区、920px 对话与输入宽度，以及卡片间距和圆角；待截图核验。
-- Colors and visual tokens: 已切换为暖白、浅灰、深橄榄绿和柔和草绿主题。
-- Image quality and asset fidelity: 本轮只参考样式与颜色，未引入或替换产品图片和品牌资产。
-- Copy and content: 未修改本轮任何 HTML 文案或 JavaScript 功能逻辑。
-
-## Comparison history
-
-- 本轮无可用浏览器截图，因此尚不能开始有效的视觉对比迭代。
-
-## Implementation checklist
-
-- [x] 仅新增 CSS 主题覆盖。
-- [x] 保留既有功能与内容。
-- [x] 增加桌面端和移动端样式规则。
-- [x] `npm run build` 通过。
-- [ ] 补充浏览器截图与交互核验。
-
-final result: blocked
